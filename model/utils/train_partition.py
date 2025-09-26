@@ -1,6 +1,6 @@
 # for partitioning of training and testing data
 
-from config import model_parameters as mp 
+from .config import model_parameters as mp
 
 class ds_part:
     def __init__(self, training_ids, testing_ids, training_set, testing_set, vocab):

@@ -27,6 +27,23 @@ import re
 from utils import input, processing, train_partition, seed_vocab
 
 # config
-from config import model_parameters as mp
+from utils.config import model_parameters as mp
 
 # spa_vocab = WordsToSPAVocab(vocab)
+
+# # Seed vocab data
+# # seed_vocab_vectors = {i: seed_vocab_model.wv.get_vector(i) for i in spa_vocab[0:-2]} # removing pad_token and unknown_token
+# seed_vocab_vectors = {i: seed_vocab_model.wv.get_vector(i) for i in spa_vocab[0:-1]} # removing pad_token
+
+# # vocabulary for our model: store of semantic pointers 
+# model_vocab = spa.Vocabulary(dimensions=mp.rep_vocab_dim, strict=False, pointer_gen=None, max_similarity=rep_vocab_max_sim)
+# # for random creation, model_vocab.populate(";".join(spa_vocab))
+# # for random normalized creation, model_vocab.populate(".normalized();".join(spa_vocab))
+# # for random unitary creation, model_vocab.populate(".unitary();".join(spa_vocab))
+
+# # creating pointers
+# for i,j in seed_vocab_vectors.items():
+#     model_vocab.add(key = i, p = j)
+# # padding and unknown characters
+# # model_vocab.populate(";".join([pad_token, unknown_token])) # strict case
+# model_vocab.add(key = pad_token, p = np.zeros(rep_vocab_dim))
