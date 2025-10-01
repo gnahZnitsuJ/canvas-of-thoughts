@@ -1,7 +1,7 @@
 # model input functions
 
 from config import model_parameters as mp
-from processing import WordsToSPAVocab
+from utils.processing import WordsToSPAVocab
 
 # will return a context vector of tokens dependent on time
 def context_in(t, training_set=[], testing_set=[]):
@@ -44,3 +44,6 @@ def find_target(t, training_set=[], testing_set=[]):
 
 def is_recall(t, training_time):
 	return t > training_time
+
+def is_one(input):
+	return input == 1

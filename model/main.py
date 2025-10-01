@@ -1,3 +1,5 @@
+import os
+
 # for preprocessing of natural language
 # important nltk requisite downloads include: tokenize, reuters
 import nltk
@@ -14,9 +16,6 @@ import nengo_dl
 import gensim
 from gensim.models import Word2Vec
 
-# train test split
-from sklearn.model_selection import train_test_split
-
 # numpy
 import numpy as np
 
@@ -24,26 +23,53 @@ import numpy as np
 import re
 
 # data processing functions
-from utils import input, processing, train_partition, seed_vocab
-
+from utils import input, train_partition, seed_vocab
+from utils.processing import WordsToSPAVocab, SPAVocabToWords
+from utils.train_partition import data_partition
 # config
-from utils.config import model_parameters as mp
+from config import model_parameters as mp
+# components
+from components.net_comp import test
 
-# spa_vocab = WordsToSPAVocab(vocab)
+# datasets
+datasets = [reuters]
 
-# # Seed vocab data
-# # seed_vocab_vectors = {i: seed_vocab_model.wv.get_vector(i) for i in spa_vocab[0:-2]} # removing pad_token and unknown_token
-# seed_vocab_vectors = {i: seed_vocab_model.wv.get_vector(i) for i in spa_vocab[0:-1]} # removing pad_token
+# seed vocab data using training sets of all datasets
+if os.path.isfile("canvas-of-thoughts/model/utils/seed_vocab.model"):
+    print("seed_vocab.model exists in the current directory.")
+    seed_vocab_model = Word2Vec.load("canvas-of-thoughts/model/utils/seed_vocab.model")
+else:
+    print("seed_vocab.model does NOT exist in the current directory.")
+    print("Generating seed vocabulary model...")
+    from utils import seed_vocab
+    seed_vocab.generate_seed_vocab(datasets)
+    seed_vocab_model = Word2Vec.load("canvas-of-thoughts/model/utils/seed_vocab.model")
+ 
+# unique words in training set
+vocab = [t
+         for ds in datasets
+         for x in data_partition(ds, 
+                                 training_restriction=mp.training_restriction, 
+                                 testing_restriction=mp.testing_restriction, 
+                                 strict=False).training_ids
+         for t in ds.words(x)
+        ]
+vocab = list(set(vocab))
 
-# # vocabulary for our model: store of semantic pointers 
-# model_vocab = spa.Vocabulary(dimensions=mp.rep_vocab_dim, strict=False, pointer_gen=None, max_similarity=rep_vocab_max_sim)
-# # for random creation, model_vocab.populate(";".join(spa_vocab))
-# # for random normalized creation, model_vocab.populate(".normalized();".join(spa_vocab))
-# # for random unitary creation, model_vocab.populate(".unitary();".join(spa_vocab))
+# translated words that can be used in the model
+spa_vocab = WordsToSPAVocab(vocab)
 
-# # creating pointers
-# for i,j in seed_vocab_vectors.items():
-#     model_vocab.add(key = i, p = j)
-# # padding and unknown characters
-# # model_vocab.populate(";".join([pad_token, unknown_token])) # strict case
-# model_vocab.add(key = pad_token, p = np.zeros(rep_vocab_dim))
+# vectors from seed_vocab
+seed_vocab_vectors = {i: seed_vocab_model.wv.get_vector(i) for i in spa_vocab[0:-1]} # removing pad_token
+
+# vocabulary for our model: store of semantic pointers 
+model_vocab = spa.Vocabulary(dimensions=mp.rep_vocab_dim, strict=False, pointer_gen=None, max_similarity=mp.rep_vocab_max_sim)
+
+# creating pointers
+for i,j in seed_vocab_vectors.items():
+    model_vocab.add(key = i, p = j)
+# padding and unknown characters
+model_vocab.add(key = mp.pad_token, p = np.zeros(mp.rep_vocab_dim))
+
+# end
+print("End")

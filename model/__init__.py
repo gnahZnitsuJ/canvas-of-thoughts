@@ -1,8 +1,8 @@
 # This file marks the 'model' directory as a Python package.
 
-__all__ = ["config", "components", "utils", "main"]
+__all__ = ["components", "utils", "config", "main"]
 
 import components
-import config
 import utils
+import config
 import main
