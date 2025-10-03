@@ -25,11 +25,11 @@ import re
 # data processing functions
 from utils import input, train_partition, seed_vocab
 from utils.processing import WordsToSPAVocab, SPAVocabToWords
-from utils.train_partition import data_partition
+from utils.train_partition import multiple_data_partition, data_partition
 # config
 from config import model_parameters as mp
 # components
-from components.net_comp import test
+# from components.net_comp import test_model
 
 # datasets
 datasets = [reuters]
@@ -46,15 +46,12 @@ else:
     seed_vocab_model = Word2Vec.load("canvas-of-thoughts/model/utils/seed_vocab.model")
  
 # unique words in training set
-vocab = [t
-         for ds in datasets
-         for x in data_partition(ds, 
-                                 training_restriction=mp.training_restriction, 
-                                 testing_restriction=mp.testing_restriction, 
-                                 strict=False).training_ids
-         for t in ds.words(x)
-        ]
-vocab = list(set(vocab))
+
+train_test = multiple_data_partition(datasets, 
+                                     training_restriction=mp.training_restriction, 
+                                     testing_restriction=mp.testing_restriction, 
+                                     strict=False)
+vocab = train_test.vocab
 
 # translated words that can be used in the model
 spa_vocab = WordsToSPAVocab(vocab)

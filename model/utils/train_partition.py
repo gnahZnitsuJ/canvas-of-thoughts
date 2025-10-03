@@ -11,6 +11,7 @@ class ds_part:
         self.vocab = vocab
 
 def data_partition(ds, training_restriction=0, testing_restriction=0, strict=False):
+    """Partition the provided dataset into training and testing sets."""
     # distinguishing training and testing data
     training_ids = [x for x in ds.fileids() if "training/" in x]
     testing_ids = [x for x in ds.fileids() if "test/" in x]
@@ -70,3 +71,26 @@ def data_partition(ds, training_restriction=0, testing_restriction=0, strict=Fal
                    training_set=training_set, 
                    testing_set=testing_set, 
                    vocab=vocab)
+
+def multiple_data_partition(datasets=[], context_length=mp.context_length, training_restriction=0, testing_restriction=0, strict=False):
+    """data_partition, but for multiple datasets"""
+    
+    training_ids = []
+    testing_ids = []
+    training_set = []
+    testing_set = []
+    vocab = []
+
+    for ds in datasets:
+        pt = data_partition(ds, training_restriction, testing_restriction, strict)
+        training_ids += pt.training_ids
+        testing_ids += pt.testing_ids
+        training_set += pt.training_set
+        testing_set += pt.testing_set
+        vocab += pt.vocab
+
+    return ds_part(training_ids=training_ids, 
+                   testing_ids=testing_ids,
+                   training_set=training_set,
+                   testing_set=testing_set,
+                   vocab=list(set(vocab))) # unique vocab
