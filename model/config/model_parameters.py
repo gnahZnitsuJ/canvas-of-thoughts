@@ -27,3 +27,6 @@ model_lr = 0.005 # learning rate for PES rule.
 # special tokens
 unknown_token = "CV_UNK"
 pad_token = "CV_PAD"
+
+# strict vocab: include unknown token in vocab
+strict_vocab = False

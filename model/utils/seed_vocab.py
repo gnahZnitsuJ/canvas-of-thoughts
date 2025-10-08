@@ -25,7 +25,7 @@ def generate_seed_vocab(dataset_list=[]):
         pt = tp.data_partition(ds, 
                                training_restriction=mp.training_restriction, 
                                testing_restriction=mp.testing_restriction, 
-                               strict=False) # partition of dataset
+                               strict=mp.strict_vocab) # partition of dataset
         
         # appending the vocab and the sentence data of partitions in the dataset list
         vocab += [
