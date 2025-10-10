@@ -4,6 +4,15 @@ import numpy as np
 import nengo
 import nengo_spa as spa
 
+class ModelResult:
+    def __init__(self, model):
+        self.model = model
+        self.p_target = [t for t in model.probes if t.label == "target"][0]
+        self.p_error = [t for t in model.probes if t.label == "error"][0]
+        self.p_post_state = [t for t in model.probes if t.label == "post_state"][0]
+        self.p_target_word = [t for t in model.probes if t.label == "target_word"][0]
+        self.p_result_word = [t for t in model.probes if t.label == "result_word"][0]
+
 # model
 def single(model_vocab, training_set=[], testing_set=[], strict=False, vocab=[]):
     with spa.Network(seed=mp.seed) as model:
@@ -45,12 +54,12 @@ def single(model_vocab, training_set=[], testing_set=[], strict=False, vocab=[])
             )
 
         # Probes to record simulation data
-        p_target = nengo.Probe(target.output)
-        p_error = nengo.Probe(error.output, synapse=0.01)
-        p_post_state = nengo.Probe(post_state.output, synapse=0.01)
+        p_target = nengo.Probe(target.output, label="target")
+        p_error = nengo.Probe(error.output, label="error")
+        p_post_state = nengo.Probe(post_state.output, label="post_state")
         
         # sampling more consistently for word data
-        p_target_word = nengo.Probe(target.output, sample_every=mp.tr_impression/2)
-        p_result_word = nengo.Probe(post_state.output, synapse=0.01, sample_every=mp.tr_impression/2)
+        p_target_word = nengo.Probe(target.output, sample_every=mp.tr_impression/2, label="target_word")
+        p_result_word = nengo.Probe(post_state.output, sample_every=mp.tr_impression/2, label="result_word")
 
-    return model, p_target, p_error, p_post_state, p_target_word, p_result_word
+    return ModelResult(model)

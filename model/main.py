@@ -76,14 +76,22 @@ for i,j in seed_vocab_vectors.items():
 # padding and unknown characters
 model_vocab.add(key = mp.pad_token, p = np.zeros(mp.rep_vocab_dim))
 
-model, p_target, p_error, p_post_state, p_target_word, p_result_word = nc.single(
-    model_vocab, 
+model_result = nc.single(
+    model_vocab,
     training_set=train_test.training_set,
     testing_set=train_test.testing_set,
     strict=mp.strict_vocab,
-    vocab=vocab)
+    vocab=vocab
+)
 
 # preliminary simulation
+
+# probes
+p_target = model_result.p_target
+p_error = model_result.p_error
+p_post_state = model_result.p_post_state
+p_target_word = model_result.p_target_word
+p_result_word = model_result.p_result_word
 
 # training time length
 training_time = len(train_test.training_set)*mp.tr_impression
@@ -92,7 +100,7 @@ testing_time = (len(train_test.testing_set)-1)*mp.tr_impression
 
 simulation_length = training_time + testing_time
 
-with nengo_dl.Simulator(model) as sim:
+with nengo_dl.Simulator(model_result.model) as sim:
     sim.run(simulation_length)
 
 print(f"Amount of simulated training time: {training_time}")
