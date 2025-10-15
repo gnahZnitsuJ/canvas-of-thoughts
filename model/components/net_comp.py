@@ -14,10 +14,10 @@ class ModelResult:
         self.p_result_word = [t for t in model.probes if t.label == "result_word"][0]
 
 # model
-def single(model_vocab, training_set=[], testing_set=[], strict=False, vocab=[]):
+def single(model_vocab, training_set=[], testing_set=[], strict=False, vocab=[], context_sub_length=mp.subcontext_length):
     with spa.Network(seed=mp.seed) as model:
         # transcoding training into semantic pointers
-        context = spa.Transcode(lambda t : context_in(t, training_set, testing_set, strict, vocab), output_vocab=model_vocab)
+        context = spa.Transcode(lambda t : context_in(t, training_set, testing_set, strict, vocab, sub_length=context_sub_length), output_vocab=model_vocab)
         target = spa.Transcode(lambda t: find_target(t, training_set, testing_set, strict, vocab), output_vocab=model_vocab)
 
         # State (ensembles) for learning
@@ -34,6 +34,54 @@ def single(model_vocab, training_set=[], testing_set=[], strict=False, vocab=[])
         context >> pre_state
         -post_state >> error
         target >> error
+
+        # learning between ensembles
+        assert len(pre_state.all_ensembles) == 1
+        assert len(post_state.all_ensembles) == 1
+        learning_connection = nengo.Connection(
+            pre_state.all_ensembles[0],
+            post_state.all_ensembles[0],
+            function=lambda x: np.random.random(model_vocab.dimensions),
+            learning_rule_type=nengo.PES(mp.model_lr), # Prescribed Error Sensitivity
+        )
+        nengo.Connection(error.output, learning_connection.learning_rule, transform=-1)
+
+        # Suppress learning in the final iteration to test
+        is_recall_node = nengo.Node(lambda t: is_recall(t, len(training_set)*mp.tr_impression), size_out=1)
+        for ens in error.all_ensembles:
+            nengo.Connection(
+                is_recall_node, ens.neurons, transform=-100 * np.ones((ens.n_neurons, 1))
+            )
+
+        # Probes to record simulation data
+        p_target = nengo.Probe(target.output, label="target")
+        p_error = nengo.Probe(error.output, label="error")
+        p_post_state = nengo.Probe(post_state.output, label="post_state")
+        
+        # sampling more consistently for word data
+        p_target_word = nengo.Probe(target.output, sample_every=mp.tr_impression/2, label="target_word")
+        p_result_word = nengo.Probe(post_state.output, sample_every=mp.tr_impression/2, label="result_word")
+
+    return ModelResult(model)
+
+def aggregate(inputs, model_vocab, training_set=[], testing_set=[], strict=False, vocab=[]):
+    with spa.Network(seed=mp.seed) as model:
+        target = spa.Transcode(lambda t: find_target(t, training_set, testing_set, strict, vocab), output_vocab=model_vocab)
+
+        # State (ensembles) for learning
+        pre_state = spa.State(
+            model_vocab, subdimensions=model_vocab.dimensions, represent_cc_identity=False
+        )
+        post_state = spa.State(
+            model_vocab, subdimensions=model_vocab.dimensions, represent_cc_identity=False
+        )
+        error = spa.State(model_vocab)
+
+        for i in inputs:
+            i >> pre_state
+        
+        -post_state >> error
+        target 
 
         # learning between ensembles
         assert len(pre_state.all_ensembles) == 1
