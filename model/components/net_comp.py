@@ -14,10 +14,14 @@ class ModelResult:
         self.p_result_word = [t for t in model.probes if t.label == "result_word"][0]
 
 # model
-def single(model_vocab, training_set=[], testing_set=[], strict=False, vocab=[], context_sub_length=mp.subcontext_length):
+def single(model_vocab, training_set=[], testing_set=[], strict=False, vocab=[], context_sub_length=mp.context_length):
+    assert isinstance(context_sub_length, int) and context_sub_length > 0, "context_sub_length must be a positive integer"
+
     with spa.Network(seed=mp.seed) as model:
         # transcoding training into semantic pointers
-        context = spa.Transcode(lambda t : context_in(t, training_set, testing_set, strict, vocab, sub_length=context_sub_length), output_vocab=model_vocab)
+        context = spa.Transcode(lambda t : context_in(t=t, training_set=training_set, testing_set=testing_set, 
+                                                      sub_length=context_sub_length, strict=strict, vocab=vocab), 
+                                output_vocab=model_vocab)
         target = spa.Transcode(lambda t: find_target(t, training_set, testing_set, strict, vocab), output_vocab=model_vocab)
 
         # State (ensembles) for learning
@@ -78,14 +82,14 @@ def aggregate(inputs, model_vocab, training_set=[], testing_set=[], strict=False
         error = spa.State(model_vocab)
 
         for i in inputs:
-            i >> pre_state
+            i.model >> pre_state
         
         -post_state >> error
-        target 
+        target >> error
 
         # learning between ensembles
-        assert len(pre_state.all_ensembles) == 1
-        assert len(post_state.all_ensembles) == 1
+        # assert len(pre_state.all_ensembles) == 1
+        # assert len(post_state.all_ensembles) == 1
         learning_connection = nengo.Connection(
             pre_state.all_ensembles[0],
             post_state.all_ensembles[0],

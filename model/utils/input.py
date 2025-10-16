@@ -5,7 +5,7 @@ from utils.processing import WordsToSPAVocab
 
 # will return a context vector of tokens dependent on time
 # can handle a subcontext length
-def context_in(t, training_set=[], testing_set=[], sub_length=mp.subcontext_length, strict=False, vocab=[]):
+def context_in(t, training_set=[], testing_set=[], sub_length=mp.context_length, strict=False, vocab=[]):
 	# testing time length
 	training_time = len(training_set)*mp.tr_impression
 

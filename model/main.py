@@ -76,7 +76,17 @@ for i,j in seed_vocab_vectors.items():
 # padding and unknown characters
 model_vocab.add(key = mp.pad_token, p = np.zeros(mp.rep_vocab_dim))
 
-model_result = nc.single(
+model_result = nc.aggregate(
+    [nc.single(
+        model_vocab,
+        training_set=train_test.training_set,
+        testing_set=train_test.testing_set,
+        context_sub_length=t,
+        strict=mp.strict_vocab,
+        vocab=vocab
+        )
+     for t in range(1, mp.context_length+1)
+    ],
     model_vocab,
     training_set=train_test.training_set,
     testing_set=train_test.testing_set,
