@@ -3,6 +3,7 @@ from config import model_parameters as mp
 import numpy as np
 import nengo
 import nengo_spa as spa
+import net_classes as ncls
 
 class ModelResult:
     def __init__(self, model):
@@ -13,8 +14,8 @@ class ModelResult:
         self.p_target_word = [t for t in model.probes if t.label == "target_word"][0]
         self.p_result_word = [t for t in model.probes if t.label == "result_word"][0]
 
-# model
-def single(model_vocab, training_set=[], testing_set=[], strict=False, vocab=[], context_sub_length=mp.context_length):
+# single processing stream
+def single(model_vocab, training_set=[], testing_set=[],  context_sub_length=mp.context_length, strict=False, vocab=[]):
     assert isinstance(context_sub_length, int) and context_sub_length > 0, "context_sub_length must be a positive integer"
 
     with spa.Network(seed=mp.seed) as model:
@@ -81,8 +82,10 @@ def aggregate(inputs, model_vocab, training_set=[], testing_set=[], strict=False
         )
         error = spa.State(model_vocab)
 
-        for i in inputs:
-            i.model >> pre_state
+        in_list = [i.model for i in inputs]
+
+        for i in in_list:
+            i.prediction >> pre_state
         
         -post_state >> error
         target >> error
