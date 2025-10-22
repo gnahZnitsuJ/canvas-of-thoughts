@@ -30,6 +30,7 @@ from utils.train_partition import multiple_data_partition, data_partition
 from config import model_parameters as mp
 # components
 import components.net_comp as nc
+import components.net_classes as ncls
 # from components.net_comp import test_model
 
 # datasets
@@ -77,17 +78,17 @@ for i,j in seed_vocab_vectors.items():
 model_vocab.add(key = mp.pad_token, p = np.zeros(mp.rep_vocab_dim))
 
 model_result = nc.aggregate(
-    [nc.single(
-        model_vocab,
+    [ncls.BaseComponent(
+        label=f"Component_{i}",
+        seed=mp.seed,
+        model_vocab=model_vocab,
         training_set=train_test.training_set,
         testing_set=train_test.testing_set,
         context_sub_length=t,
         strict=mp.strict_vocab,
-        vocab=vocab
-        )
-     for t in range(1, mp.context_length+1)
-    ],
-    model_vocab,
+        vocab=vocab) 
+    for t in range(1, mp.context_length+1)],
+    model_vocab=model_vocab,
     training_set=train_test.training_set,
     testing_set=train_test.testing_set,
     strict=mp.strict_vocab,

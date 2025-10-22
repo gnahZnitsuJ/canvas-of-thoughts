@@ -3,7 +3,6 @@ from config import model_parameters as mp
 import numpy as np
 import nengo
 import nengo_spa as spa
-import net_classes as ncls
 
 class ModelResult:
     def __init__(self, model):
@@ -23,7 +22,9 @@ def single(model_vocab, training_set=[], testing_set=[],  context_sub_length=mp.
         context = spa.Transcode(lambda t : context_in(t=t, training_set=training_set, testing_set=testing_set, 
                                                       sub_length=context_sub_length, strict=strict, vocab=vocab), 
                                 output_vocab=model_vocab)
-        target = spa.Transcode(lambda t: find_target(t, training_set, testing_set, strict, vocab), output_vocab=model_vocab)
+        target = spa.Transcode(lambda t: find_target(t=t, training_set=training_set, testing_set=testing_set, 
+                                                     strict=strict, vocab=vocab), 
+                                output_vocab=model_vocab)
 
         # State (ensembles) for learning
         pre_state = spa.State(
@@ -82,9 +83,7 @@ def aggregate(inputs, model_vocab, training_set=[], testing_set=[], strict=False
         )
         error = spa.State(model_vocab)
 
-        in_list = [i.model for i in inputs]
-
-        for i in in_list:
+        for i in inputs:
             i.prediction >> pre_state
         
         -post_state >> error
