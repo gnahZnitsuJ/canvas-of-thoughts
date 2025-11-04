@@ -3,6 +3,7 @@ from config import model_parameters as mp
 import numpy as np
 import nengo
 import nengo_spa as spa
+import components.net_classes as ncls
 
 class ModelResult:
     def __init__(self, model):
@@ -70,8 +71,20 @@ def single(model_vocab, training_set=[], testing_set=[],  context_sub_length=mp.
 
     return ModelResult(model)
 
-def aggregate(inputs, model_vocab, training_set=[], testing_set=[], strict=False, vocab=[]):
+def aggregate(model_vocab, training_set=[], testing_set=[], strict=False, vocab=[]):
     with spa.Network(seed=mp.seed) as model:
+        # subsystems
+        subs = [ncls.BaseComponent(
+            label=f"Component_{t}",
+            seed=mp.seed,
+            model_vocab=model_vocab,
+            training_set=training_set,
+            testing_set=testing_set,
+            context_sub_length=t,
+            strict=mp.strict_vocab,
+            vocab=vocab) 
+            for t in range(1, mp.context_length+1)]
+
         target = spa.Transcode(lambda t: find_target(t, training_set, testing_set, strict, vocab), output_vocab=model_vocab)
 
         # State (ensembles) for learning
@@ -83,7 +96,7 @@ def aggregate(inputs, model_vocab, training_set=[], testing_set=[], strict=False
         )
         error = spa.State(model_vocab)
 
-        for i in inputs:
+        for i in subs:
             i.prediction >> pre_state
         
         -post_state >> error

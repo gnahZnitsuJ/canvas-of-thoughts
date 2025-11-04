@@ -1,14 +1,15 @@
 import nengo
 import nengo_spa as spa
+from nengo_spa.network import Network
 import numpy as np
 from utils.input import context_in, find_target, is_recall
 from config import model_parameters as mp
 
 # class for single processing step from context
-class BaseComponent(spa.Network):
+class BaseComponent(Network):
     def __init__(self, model_vocab, label=None, seed=None, training_set=[], testing_set=[], 
                  context_sub_length=mp.context_length, strict=mp.strict_vocab, vocab=[]):
-        super(BaseComponent, self).__init__(
+        super().__init__(
             label=label, seed=seed
         )
 
@@ -18,7 +19,7 @@ class BaseComponent(spa.Network):
                 lambda t : context_in(
                     t=t, training_set=training_set, testing_set=testing_set, 
                     sub_length=context_sub_length, strict=strict, vocab=vocab), 
-                output_vocab=model_vocab
+                output_vocab=model_vocab  
             )
             self.target = spa.Transcode(
                 lambda t: find_target(
