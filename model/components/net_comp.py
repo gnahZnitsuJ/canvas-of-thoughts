@@ -71,7 +71,7 @@ def single(model_vocab, training_set=[], testing_set=[],  context_sub_length=mp.
 
     return ModelResult(model)
 
-def aggregate(model_vocab, training_set=[], testing_set=[], strict=False, vocab=[]):
+def aggregate(sub_lengths, model_vocab, training_set=[], testing_set=[], strict=False, vocab=[]):
     with spa.Network(seed=mp.seed) as model:
         # subsystems
         subs = [ncls.BaseComponent(
@@ -83,7 +83,7 @@ def aggregate(model_vocab, training_set=[], testing_set=[], strict=False, vocab=
             context_sub_length=t,
             strict=mp.strict_vocab,
             vocab=vocab) 
-            for t in range(1, mp.context_length+1)]
+            for t in sub_lengths]
 
         target = spa.Transcode(lambda t: find_target(t, training_set, testing_set, strict, vocab), output_vocab=model_vocab)
 

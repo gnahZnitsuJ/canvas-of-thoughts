@@ -10,7 +10,8 @@ from nltk.corpus import reuters
 import nengo
 import nengo_spa as spa
 import matplotlib.pyplot as plt
-import nengo_dl
+# import nengo_dl
+import nengo_ocl
 
 # gensim for seed word embedding
 import gensim
@@ -77,14 +78,13 @@ for i,j in seed_vocab_vectors.items():
 model_vocab.add(key = mp.pad_token, p = np.zeros(mp.rep_vocab_dim))
 
 model_result = nc.aggregate(
+    sub_lengths=[1,mp.context_length],
     model_vocab=model_vocab,
     training_set=train_test.training_set,
     testing_set=train_test.testing_set,
     strict=mp.strict_vocab,
     vocab=vocab
 )
-
-# preliminary simulation
 
 # probes
 p_target = model_result.p_target
@@ -100,7 +100,9 @@ testing_time = (len(train_test.testing_set)-1)*mp.tr_impression
 
 simulation_length = training_time + testing_time
 
-with nengo_dl.Simulator(model_result.model) as sim:
+# preliminary simulation
+
+with nengo_ocl.Simulator(model_result.model) as sim:
     sim.run(simulation_length)
 
 print(f"Amount of simulated training time: {training_time}")
@@ -122,3 +124,15 @@ print(" ".join(SPAVocabToWords(["WV_" + spa.text(sim.data[p_target_word][i], voc
 
 # end
 print("End")
+
+# real time simulation
+
+# with nengo.Simulator(model_result.model) as sim:
+#     # Use a while loop to keep the simulation running indefinitely for live input
+#     print("Simulation running in real-time. Press Ctrl+C to stop.")
+#     try:
+#         while True:
+#             sim.step()
+            
+#     except KeyboardInterrupt:
+#         print("Simulation stopped by user.")
