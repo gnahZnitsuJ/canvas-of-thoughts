@@ -2,31 +2,23 @@ import nengo
 import nengo_spa as spa
 from nengo_spa.network import Network
 import numpy as np
-from utils.input import context_in, find_target, is_recall
 from config import model_parameters as mp
 
 # class for single processing step from context
 class BaseComponent(Network):
-    def __init__(self, model_vocab, label=None, seed=None, training_set=[], testing_set=[], 
-                 context_sub_length=mp.context_length, strict=mp.strict_vocab, vocab=[]):
+    def __init__(self, model_vocab,
+                 context_in, target_in,
+                 label=None, seed=None, 
+                 context_sub_length=mp.context_length, 
+                 strict=mp.strict_vocab):
         super().__init__(
             label=label, seed=seed
         )
 
         with self:
             # transcoding training into semantic pointers
-            self.context = spa.Transcode(
-                lambda t : context_in(
-                    t=t, training_set=training_set, testing_set=testing_set, 
-                    sub_length=context_sub_length, strict=strict, vocab=vocab), 
-                output_vocab=model_vocab  
-            )
-            self.target = spa.Transcode(
-                lambda t: find_target(
-                    t=t, training_set=training_set, testing_set=testing_set, 
-                    strict=strict, vocab=vocab), 
-                output_vocab=model_vocab
-            )
+            self.context = self.context_in.node()
+            self.target = self.target_in.node()
 
             # State (ensembles) for learning
             self.pre_state = spa.State(model_vocab, subdimensions=model_vocab.dimensions, represent_cc_identity=False)
@@ -51,7 +43,7 @@ class BaseComponent(Network):
             nengo.Connection(self.error.output, self.learning_connection.learning_rule, transform=-1)
 
             # Suppress learning in the final iteration to test
-            self.is_recall_node = nengo.Node(lambda t: is_recall(t, len(training_set)*mp.tr_impression), size_out=1) 
+            self.is_recall_node = nengo.Node(lambda t: self.context_in.is_recall, size_out=1)
             for ens in self.error.all_ensembles:
                 nengo.Connection(
                     self.is_recall_node, ens.neurons, transform=-100 * np.ones((ens.n_neurons, 1))

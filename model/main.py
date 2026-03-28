@@ -78,7 +78,7 @@ for i,j in seed_vocab_vectors.items():
 model_vocab.add(key = mp.pad_token, p = np.zeros(mp.rep_vocab_dim))
 
 model_result = nc.aggregate(
-    sub_lengths=[1,mp.context_length],
+    sub_lengths=[1], # sub_lengths=[1,mp.context_length],
     model_vocab=model_vocab,
     training_set=train_test.training_set,
     testing_set=train_test.testing_set,
@@ -92,38 +92,75 @@ p_error = model_result.p_error
 p_post_state = model_result.p_post_state
 p_target_word = model_result.p_target_word
 p_result_word = model_result.p_result_word
+with model_result.model:
+    model_result.pred_probe = nengo.Probe(model_result.prediction, synapse=0.01)
 
-# training time length
-training_time = len(train_test.training_set)*mp.tr_impression
-# testing time length
-testing_time = (len(train_test.testing_set)-1)*mp.tr_impression
-
-simulation_length = training_time + testing_time
+# simulator object
+sim = nengo_ocl.Simulator(model_result.model)
 
 # preliminary simulation
+class Trainer:
+    def __init__(self, model, sim, token_to_vec, step_time=0.02):
+        self.model = model
+        self.sim = sim
+        self.token_to_vec = token_to_vec
+        self.step_time = step_time
 
-with nengo_ocl.Simulator(model_result.model) as sim:
-    sim.run(simulation_length)
+        # error buffer (shared with Node)
+        self.error_buffer = np.zeros(model.prediction.dimensions)
 
-print(f"Amount of simulated training time: {training_time}")
-print(f"Amount of simulated testing time: {testing_time}")
+        # attach to error node
+        self.model.error.output = self.error_buffer
 
-# plotting metrics for testing
-plt.figure(figsize=(8,8))
-plt.plot(sim.trange(), np.linalg.norm(spa.similarity(sim.data[p_post_state], model_vocab) - spa.similarity(sim.data[p_target], model_vocab), axis = 1))
-plt.ylim(bottom=0)
-plt.title("Training")
-plt.ylabel("Norm of Difference in Vocab Similarity between Result and Target")
-plt.xlabel(f"Time (Testing Starts After: {training_time})")
+    def present(self, token):
+        vec = self.token_to_vec[token]
+        self.model.input_module.set(vec)
+        self.sim.run(self.step_time)
 
-# example text
-print(" ".join(SPAVocabToWords(["WV_" + spa.text(sim.data[p_result_word][i], vocab=model_vocab, maximum_count=1).split("WV_",1)[-1] 
- for i in range(len(train_test.training_set), len(train_test.training_set)+100)])[::2]))
-print(" ".join(SPAVocabToWords(["WV_" + spa.text(sim.data[p_target_word][i], vocab=model_vocab, maximum_count=1).split("WV_",1)[-1] 
- for i in range(len(train_test.training_set), len(train_test.training_set)+100)])[::2]))
+    def train_pair(self, token, target):
+        # forward pass
+        self.present(token)
 
-# end
-print("End")
+        # read prediction from probe (GPU-safe)
+        pred = self.sim.data[self.model.pred_probe][-1]
+
+        # compute error
+        self.error_buffer[:] = self.token_to_vec[target] - pred
+
+        # learning phase
+        self.sim.run(self.step_time)
+
+        # clear error
+        self.error_buffer[:] = 0
+
+    def train_sequence(self, tokens):
+        for i in range(len(tokens) - 1):
+            self.train_pair(tokens[i], tokens[i + 1])
+
+
+trainer = Trainer(model_result, sim, spa_vocab, step_time=0.02)
+
+trainer.train_sequence(train_test.training_set)
+
+# print(f"Amount of simulated training time: {training_time}")
+# print(f"Amount of simulated testing time: {testing_time}")
+
+# # plotting metrics for testing
+# plt.figure(figsize=(8,8))
+# plt.plot(sim.trange(), np.linalg.norm(spa.similarity(sim.data[p_post_state], model_vocab) - spa.similarity(sim.data[p_target], model_vocab), axis = 1))
+# plt.ylim(bottom=0)
+# plt.title("Training")
+# plt.ylabel("Norm of Difference in Vocab Similarity between Result and Target")
+# plt.xlabel(f"Time (Testing Starts After: {training_time})")
+
+# # example text
+# print(" ".join(SPAVocabToWords(["WV_" + spa.text(sim.data[p_result_word][i], vocab=model_vocab, maximum_count=1).split("WV_",1)[-1] 
+#  for i in range(len(train_test.training_set), len(train_test.training_set)+100)])[::2]))
+# print(" ".join(SPAVocabToWords(["WV_" + spa.text(sim.data[p_target_word][i], vocab=model_vocab, maximum_count=1).split("WV_",1)[-1] 
+#  for i in range(len(train_test.training_set), len(train_test.training_set)+100)])[::2]))
+
+# # end
+# print("End")
 
 # real time simulation
 
