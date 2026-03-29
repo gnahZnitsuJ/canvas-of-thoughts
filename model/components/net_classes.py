@@ -17,8 +17,8 @@ class BaseComponent(Network):
 
         with self:
             # transcoding training into semantic pointers
-            self.context = self.context_in.node()
-            self.target = self.target_in.node()
+            self.context = context_in.node()
+            self.target = target_in.node()
 
             # State (ensembles) for learning
             self.pre_state = spa.State(model_vocab, subdimensions=model_vocab.dimensions, represent_cc_identity=False)
@@ -26,10 +26,12 @@ class BaseComponent(Network):
             self.error = spa.State(model_vocab)
 
             # signal connections between objects see report for connection logic
+            nengo.Connection(self.context, self.pre_state.input, synapse=None)
             # input and error
-            self.context >> self.pre_state
+            nengo.Connection(self.target, self.error.input, synapse=None)
             -self.post_state >> self.error
-            self.target >> self.error
+            nengo.Connection(self.target, self.error.input, synapse=None)
+
 
             # learning between ensembles
             assert len(self.pre_state.all_ensembles) == 1
@@ -43,20 +45,20 @@ class BaseComponent(Network):
             nengo.Connection(self.error.output, self.learning_connection.learning_rule, transform=-1)
 
             # Suppress learning in the final iteration to test
-            self.is_recall_node = nengo.Node(lambda t: self.context_in.is_recall, size_out=1)
+            self.is_recall_node = nengo.Node(lambda t: context_in.is_recall, size_out=1)
             for ens in self.error.all_ensembles:
                 nengo.Connection(
                     self.is_recall_node, ens.neurons, transform=-100 * np.ones((ens.n_neurons, 1))
                 )
 
             # Probes to record simulation data
-            self.p_target = nengo.Probe(self.target.output, label="target")
+            # self.p_target = nengo.Probe(self.target.output, label="target")
             self.p_error = nengo.Probe(self.error.output, label="error")
             self.p_post_state = nengo.Probe(self.post_state.output, label="post_state")
             
             # sampling more consistently for word data
-            self.p_target_word = nengo.Probe(self.target.output, sample_every=mp.tr_impression/2, label="target_word")
-            self.p_result_word = nengo.Probe(self.post_state.output, sample_every=mp.tr_impression/2, label="result_word")
+            # self.p_target_word = nengo.Probe(self.target.output, sample_every=mp.tr_impression/2, label="target_word")
+            # self.p_result_word = nengo.Probe(self.post_state.output, sample_every=mp.tr_impression/2, label="result_word")
 
             # component prediction output
             self.prediction = self.post_state
