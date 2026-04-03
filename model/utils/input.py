@@ -20,3 +20,10 @@ class InputModule:
 
     def set(self, vector):
         self.buffer[:] = vector
+
+# creates a unitary vector for encoding position later
+def make_unitary(dim, rng=np.random):
+    v = rng.randn(dim)
+    fft = np.fft.fft(v)
+    fft /= np.abs(fft)
+    return np.fft.ifft(fft).real
