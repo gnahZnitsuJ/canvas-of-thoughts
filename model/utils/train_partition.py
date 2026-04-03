@@ -42,28 +42,14 @@ def data_partition(ds, training_restriction=0, testing_restriction=0, strict=Fal
 
     # training set generation
     training_set = [
-        [ds.words(x)[max(0,i-mp.context_length):max(0,i)], [ds.words(x)[i]]]
+        ds.words(x)
         for x in training_ids
-        for i in range(len(ds.words(x)))
-    ]
-
-    # padding for training set
-    training_set = [
-        [[mp.pad_token] * (mp.context_length - len(x[0])) + x[0], x[1]]
-        for x in training_set
     ]
 
     # testing set generation
     testing_set = [
-        [ds.words(x)[max(0,i-mp.context_length):max(0,i)], [ds.words(x)[i]]]
+        ds.words(x)
         for x in testing_ids
-        for i in range(len(ds.words(x)))
-    ]
-
-    # padding for testing set
-    testing_set = [
-        [[mp.pad_token] * (mp.context_length - len(x[0])) + x[0], x[1]]
-        for x in testing_set
     ]
 
     return ds_part(training_ids=training_ids, 

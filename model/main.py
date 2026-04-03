@@ -11,7 +11,13 @@ import nengo
 import nengo_spa as spa
 import matplotlib.pyplot as plt
 # import nengo_dl
+
+# opencl configuration
+import pyopencl as cl
 import nengo_ocl
+platform = cl.get_platforms()[0]
+device = platform.get_devices()[0]
+ctx = cl.Context([device])
 
 # gensim for seed word embedding
 import gensim
@@ -24,14 +30,17 @@ import numpy as np
 import re
 
 # data processing functions
-from utils import input, train_partition, seed_vocab
+from utils import seed_vocab
+from utils.input import make_unitary
 from utils.processing import WordsToSPAVocab, SPAVocabToWords
 from utils.train_partition import multiple_data_partition, data_partition
 # config
 from config import model_parameters as mp
 # components
 import components.net_comp as nc
-# from components.net_comp import test_model
+from components.trainer import Trainer
+# evaluation
+from utils.eval import evaluate_model
 
 # datasets
 datasets = [reuters]
@@ -70,6 +79,9 @@ else:
 
 # vocabulary for our model: store of semantic pointers 
 model_vocab = spa.Vocabulary(dimensions=mp.rep_vocab_dim, strict=mp.strict_vocab, pointer_gen=None, max_similarity=mp.rep_vocab_max_sim)
+# add unitary vectors for position encoding if using context subsystems
+pos_vec = make_unitary(dim=mp.rep_vocab_dim)
+model_vocab.add("POS", pos_vec)
 
 # creating pointers
 for i,j in seed_vocab_vectors.items():
@@ -77,54 +89,28 @@ for i,j in seed_vocab_vectors.items():
 # padding and unknown characters
 model_vocab.add(key = mp.pad_token, p = np.zeros(mp.rep_vocab_dim))
 
-model_result = nc.aggregate(
-    sub_lengths=[1,mp.context_length],
+model_result = nc.Model(
+    sub_lengths=[1], # sub_lengths=[1,mp.context_length],
     model_vocab=model_vocab,
-    training_set=train_test.training_set,
-    testing_set=train_test.testing_set,
-    strict=mp.strict_vocab,
-    vocab=vocab
+    strict=mp.strict_vocab
 )
 
-# probes
-p_target = model_result.p_target
-p_error = model_result.p_error
-p_post_state = model_result.p_post_state
-p_target_word = model_result.p_target_word
-p_result_word = model_result.p_result_word
+# simulator object
+sim = nengo_ocl.Simulator(model_result.model, context=ctx, progress_bar=False)
 
-# training time length
-training_time = len(train_test.training_set)*mp.tr_impression
-# testing time length
-testing_time = (len(train_test.testing_set)-1)*mp.tr_impression
+trainer = Trainer(model_result, sim, model_vocab, step_time=0.02)
 
-simulation_length = training_time + testing_time
+print(f"\nTraining on {len(train_test.training_set)} sequences...")
+trainer.train_corpus(train_test.training_set)
 
-# preliminary simulation
+evaluate_model(trainer, train_test.testing_set)
 
-with nengo_ocl.Simulator(model_result.model) as sim:
-    sim.run(simulation_length)
+print("\nSample predictions:\n")
 
-print(f"Amount of simulated training time: {training_time}")
-print(f"Amount of simulated testing time: {testing_time}")
+demo_lines = trainer.demo_predictions(train_test.testing_set, max_examples=10)
 
-# plotting metrics for testing
-plt.figure(figsize=(8,8))
-plt.plot(sim.trange(), np.linalg.norm(spa.similarity(sim.data[p_post_state], model_vocab) - spa.similarity(sim.data[p_target], model_vocab), axis = 1))
-plt.ylim(bottom=0)
-plt.title("Training")
-plt.ylabel("Norm of Difference in Vocab Similarity between Result and Target")
-plt.xlabel(f"Time (Testing Starts After: {training_time})")
-
-# example text
-print(" ".join(SPAVocabToWords(["WV_" + spa.text(sim.data[p_result_word][i], vocab=model_vocab, maximum_count=1).split("WV_",1)[-1] 
- for i in range(len(train_test.training_set), len(train_test.training_set)+100)])[::2]))
-print(" ".join(SPAVocabToWords(["WV_" + spa.text(sim.data[p_target_word][i], vocab=model_vocab, maximum_count=1).split("WV_",1)[-1] 
- for i in range(len(train_test.training_set), len(train_test.training_set)+100)])[::2]))
-
-# end
-print("End")
-
+for line in demo_lines:
+    print(line)
 # real time simulation
 
 # with nengo.Simulator(model_result.model) as sim:
