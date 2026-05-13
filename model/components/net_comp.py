@@ -27,16 +27,19 @@ def Model(sub_lengths, model_vocab, strict=mp.strict_vocab):
         target_module = InputModule(dim=mp.rep_vocab_dim)
         context_module = ncls.ContextModule(model_vocab)
         
+        # contexts
+        # effective context lengths are approximate via len = 1/(1-alpha)
+        ctxs = [ncls.ContextModule(model_vocab, alpha=(1-1/t)) for t in sub_lengths] 
+
         # subsystems
         subs = [ncls.BaseComponent(
-            label=f"Component_{t}",
+            label=f"Component_{i}",
             seed=mp.seed,
-            context_in=context_module,
+            context_in=ctxs[i],
             target_in=target_module,
             model_vocab=model_vocab,
-            context_sub_length=t,
             strict=mp.strict_vocab) 
-            for t in sub_lengths]
+            for i in range(len(ctxs))]
 
         target_node = target_module.node()
 

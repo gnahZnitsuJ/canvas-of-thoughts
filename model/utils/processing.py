@@ -1,6 +1,7 @@
 # preprocessing functions
 
 import re
+from config import model_parameters as mp
 
 # vocabulary preprocessing functions to overcome limitations with
 #   nengo_spa python identifier limitations
@@ -46,8 +47,8 @@ InvCharReplacements = {v:k for k, v in CharReplacements.items()} # inverse dict 
 # turning "words" (tokens) to usable identifiers
 def WordsToSPAVocab(w: list):
     # translate special characters capital start for identifiers
-    w = [x if x[0:3] == "CV_" else "WV_" + x.translate(CharReplacementsTable) for x in w]
-    return w
+    words = ["WV_" + x.translate(CharReplacementsTable) for x in w if x != mp.pad_token]
+    return words
 
 # turning usable identifiers into "words" (tokens)
 def SPAVocabToWords(w: list):

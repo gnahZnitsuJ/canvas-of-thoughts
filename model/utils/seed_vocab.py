@@ -5,6 +5,7 @@ from utils.processing import WordsToSPAVocab
 import utils.train_partition as tp
 from nltk.corpus import reuters
 from config import model_parameters as mp
+import re
 
 # seed vocab parameters
 seed_epochs = 50
@@ -29,13 +30,15 @@ def generate_seed_vocab(dataset_list=[]):
         
         # appending the vocab and the sentence data of partitions in the dataset list
         vocab += [
-            t
+            i
             for x in pt.training_ids
             for t in ds.words(x)
+            for i in re.split(r'([^a-zA-Z0-9])', t) if i.strip()
         ]
 
-        seed_vocab_data += [WordsToSPAVocab(i) for x in pt.training_ids for i in reuters.sents(x)]
-    
+        # seed_vocab_data += [WordsToSPAVocab(i) for x in pt.training_ids for i in reuters.sents(x)]
+        seed_vocab_data += [WordsToSPAVocab([i for t in sent for i in re.split(r'([^a-zA-Z0-9])', t) if i.strip()]) for x in pt.training_ids for sent in reuters.sents(x)]
+
     vocab = list(set(vocab))
 
     # spa_vocab = WordsToSPAVocab(vocab)

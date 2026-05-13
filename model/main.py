@@ -90,7 +90,7 @@ for i,j in seed_vocab_vectors.items():
 model_vocab.add(key = mp.pad_token, p = np.zeros(mp.rep_vocab_dim))
 
 model_result = nc.Model(
-    sub_lengths=[1], # sub_lengths=[1,mp.context_length],
+    sub_lengths=[2,4,8,16,32,64,128], # sub_lengths=[1,mp.context_length],
     model_vocab=model_vocab,
     strict=mp.strict_vocab
 )
@@ -107,10 +107,30 @@ evaluate_model(trainer, train_test.testing_set)
 
 print("\nSample predictions:\n")
 
-demo_lines = trainer.demo_predictions(train_test.testing_set, max_examples=10)
+demo_count = 0
+max_demo_examples = 10
 
-for line in demo_lines:
-    print(line)
+for tokens in train_test.testing_set:
+    if len(tokens) < 2:
+        continue
+
+    for i in range(len(tokens) - 1):
+        prefix = tokens[:i+1]
+        target = tokens[i+1]
+        predictions = trainer.predict_next_sequence(prefix, top_k=3)
+        prediction_text = ", ".join(
+            f"{word} ({score:.3f})" for word, score in predictions
+        )
+
+        print(f"{' '.join(prefix)} -> {prediction_text} | target: {target}")
+
+        demo_count += 1
+        if demo_count >= max_demo_examples:
+            break
+
+    if demo_count >= max_demo_examples:
+        break
+
 # real time simulation
 
 # with nengo.Simulator(model_result.model) as sim:

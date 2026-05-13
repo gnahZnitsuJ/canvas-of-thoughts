@@ -1,6 +1,7 @@
 # for partitioning of training and testing data
 
 from config import model_parameters as mp
+import re
 
 class ds_part:
     def __init__(self, training_ids, testing_ids, training_set, testing_set, vocab):
@@ -26,9 +27,10 @@ def data_partition(ds, training_restriction=0, testing_restriction=0, strict=Fal
 
     # training set vocabulary
     vocab = [
-        t
+        i
         for x in training_ids
         for t in ds.words(x)
+        for i in re.split(r'([^a-zA-Z0-9])', t) if i.strip()
     ] # all words in training
     
     # print(len(vocab))

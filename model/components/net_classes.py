@@ -76,7 +76,7 @@ class BaseComponent(Network):
 
 # module that stores incoming tokens as future context to feed into model
 class ContextModule(spa.Network):
-    def __init__(self, vocab, alpha=0.9, label=None, seed=None):
+    def __init__(self, vocab, alpha=0.99, label=None, seed=None):
         super().__init__(label=label, seed=seed)
 
         D = vocab.dimensions

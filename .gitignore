@@ -1,2 +1,3 @@
 __pycache__/
 *.py[cod]
+model/utils/seed_vocab.model
