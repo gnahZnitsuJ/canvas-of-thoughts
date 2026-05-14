@@ -1,4 +1,6 @@
+# file handling
 import os
+from pathlib import Path
 
 # for preprocessing of natural language
 # important nltk requisite downloads include: tokenize, reuters
@@ -38,7 +40,7 @@ from utils.train_partition import multiple_data_partition, data_partition
 from config import model_parameters as mp
 # components
 import components.net_comp as nc
-from components.trainer import Trainer
+from components.runtime import ModelRuntime
 # evaluation
 from utils.eval import evaluate_model
 
@@ -46,15 +48,40 @@ from utils.eval import evaluate_model
 datasets = [reuters]
 
 # seed vocab data using training sets of all datasets
-if os.path.isfile("canvas-of-thoughts/model/utils/seed_vocab.model"):
-    print("seed_vocab.model exists in the current directory.")
-    seed_vocab_model = Word2Vec.load("canvas-of-thoughts/model/utils/seed_vocab.model")
+# project root directory
+BASE_DIR = Path(__file__).resolve().parent
+
+# seed vocab model path
+SEED_VOCAB_PATH = (
+    BASE_DIR
+    / "utils"
+    / "seed_vocab.model"
+)
+
+# seed vocab data using training sets of all datasets
+if SEED_VOCAB_PATH.is_file():
+    print("seed_vocab.model exists.")
+
+    seed_vocab_model = Word2Vec.load(
+        str(SEED_VOCAB_PATH)
+    )
+
 else:
-    print("seed_vocab.model does NOT exist in the current directory.")
+    print("seed_vocab.model does NOT exist.")
     print("Generating seed vocabulary model...")
+
     from utils import seed_vocab
+
     seed_vocab.generate_seed_vocab(datasets)
-    seed_vocab_model = Word2Vec.load("canvas-of-thoughts/model/utils/seed_vocab.model")
+
+    if not SEED_VOCAB_PATH.is_file():
+        raise FileNotFoundError(
+            f"Failed to generate {SEED_VOCAB_PATH}"
+        )
+
+    seed_vocab_model = Word2Vec.load(
+        str(SEED_VOCAB_PATH)
+    )
  
 # unique words in training set
 
@@ -83,9 +110,10 @@ model_vocab = spa.Vocabulary(dimensions=mp.rep_vocab_dim, strict=mp.strict_vocab
 pos_vec = make_unitary(dim=mp.rep_vocab_dim)
 model_vocab.add("POS", pos_vec)
 
-# creating pointers
+# creating vocab keys
 for i,j in seed_vocab_vectors.items():
     model_vocab.add(key = i, p = j)
+
 # padding and unknown characters
 model_vocab.add(key = mp.pad_token, p = np.zeros(mp.rep_vocab_dim))
 
@@ -98,12 +126,15 @@ model_result = nc.Model(
 # simulator object
 sim = nengo_ocl.Simulator(model_result.model, context=ctx, progress_bar=False)
 
-trainer = Trainer(model_result, sim, model_vocab, step_time=0.02)
+runtime = ModelRuntime(model_result, sim, model_vocab, step_time=0.02)
 
-print(f"\nTraining on {len(train_test.training_set)} sequences...")
-trainer.train_corpus(train_test.training_set)
+# simple test
+runtime.train_or_load(
+    train_test.training_set,
+    checkpoint_path="reuters_checkpoint.pkl"
+)
 
-evaluate_model(trainer, train_test.testing_set)
+evaluate_model(runtime, train_test.testing_set)
 
 print("\nSample predictions:\n")
 
@@ -117,7 +148,7 @@ for tokens in train_test.testing_set:
     for i in range(len(tokens) - 1):
         prefix = tokens[:i+1]
         target = tokens[i+1]
-        predictions = trainer.predict_next_sequence(prefix, top_k=3)
+        predictions = runtime.predict_next_sequence(prefix, top_k=3)
         prediction_text = ", ".join(
             f"{word} ({score:.3f})" for word, score in predictions
         )
@@ -131,14 +162,9 @@ for tokens in train_test.testing_set:
     if demo_count >= max_demo_examples:
         break
 
-# real time simulation
-
-# with nengo.Simulator(model_result.model) as sim:
-#     # Use a while loop to keep the simulation running indefinitely for live input
-#     print("Simulation running in real-time. Press Ctrl+C to stop.")
-#     try:
-#         while True:
-#             sim.step()
-            
-#     except KeyboardInterrupt:
-#         print("Simulation stopped by user.")
+# interactive component
+runtime.interactive_loop(
+    top_k=5,
+    generate=True,
+    max_tokens=15
+)

@@ -9,8 +9,9 @@ rng = np.random.RandomState(seed + 1) # 43 no reason in particular
 # dimension and max similarity of semantic pointer vocabulary
 # chosen using Johnson-Lindenstrauss Lemma to represent n vectors with
 # (arbitrarily chosen) given max similarity angles and dimensions
-rep_vocab_dim = 128 # must be divisible by 16 for spa.State to work.
-rep_vocab_max_sim = 0.8 # I think this only matters for .populate() ?
+# n approximately 100000
+rep_vocab_dim = 256 # must be divisible by 16 for spa.State to work.
+rep_vocab_max_sim = 0.6 # I think this only matters for .populate() ?
 
 # context length: number of words looked at before
 context_length = 20

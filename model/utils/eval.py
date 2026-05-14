@@ -1,7 +1,7 @@
 # model evaluation utilities
 
 # evaluate model predictions against test set sequences, with optional top-k accuracy
-def evaluate_model(trainer, test_sequences, max_examples=50, top_k=3):
+def evaluate_model(runtime, test_sequences, max_examples=50, top_k=3):
     correct = 0
     total = 0
 
@@ -15,7 +15,7 @@ def evaluate_model(trainer, test_sequences, max_examples=50, top_k=3):
             prefix = tokens[:i+1]
             target = tokens[i+1]
 
-            preds = trainer.predict_next_sequence(prefix, top_k=top_k)
+            preds = runtime.predict_next_sequence(prefix, top_k=top_k)
 
             if not preds:
                 continue

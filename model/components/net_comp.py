@@ -9,7 +9,7 @@ import components.net_classes as ncls
 
 # helper class to store model and probes
 class ModelResult:
-    def __init__(self, model, context_module, strict=None):
+    def __init__(self, model, context_module, strict=None, learning_connections=None, sub_lengths=None):
         self.model = model
         self.p_error = [t for t in model.probes if t.label == "error"][0]
         self.p_post_state = [t for t in model.probes if t.label == "post_state"][0]
@@ -19,6 +19,8 @@ class ModelResult:
         self.context_module = context_module
         self.strict = strict
         model.context_module = context_module
+        self.learning_connections = learning_connections or []
+        self.sub_lengths = sub_lengths
 
 # function that returns a model result object containing the desired model
 def Model(sub_lengths, model_vocab, strict=mp.strict_vocab):
@@ -90,8 +92,15 @@ def Model(sub_lengths, model_vocab, strict=mp.strict_vocab):
         model.input_module = input_module
         model.target_module = target_module
 
+    all_learning_connections = [learning_connection]
+
+    for sub in subs:
+        all_learning_connections.append(sub.learning_connection)
+
     return ModelResult(
         model,
         context_module=context_module,
-        strict=strict
+        strict=strict,
+        learning_connections=all_learning_connections,
+        sub_lengths = sub_lengths
     )
