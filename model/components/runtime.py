@@ -4,6 +4,7 @@ from tqdm import tqdm
 import pickle
 import os
 from datetime import datetime
+from time import perf_counter
 
 # helper class for running the model
 class ModelRuntime:
@@ -20,6 +21,23 @@ class ModelRuntime:
         self.normalized_vocab_vectors = self.vocab_vectors / np.maximum(
             self.vocab_norms[:, None], 1e-12
         )
+        self.sim_run_count = 0
+        self.sim_run_seconds = 0.0
+        self.simulated_seconds = 0.0
+
+    def _run_sim(self, duration):
+        start = perf_counter()
+        self.sim.run(duration)
+        self.sim_run_seconds += perf_counter() - start
+        self.sim_run_count += 1
+        self.simulated_seconds += duration
+
+    def simulator_invocation_telemetry(self):
+        return {
+            "sim_run_count": self.sim_run_count,
+            "sim_run_seconds": self.sim_run_seconds,
+            "simulated_seconds": self.simulated_seconds,
+        }
 
     # convert a token into the semantic pointer used by the network
     def _vector_for(self, token):
@@ -61,7 +79,7 @@ class ModelRuntime:
         else:
             self.model_result.target_module.set(self._vector_for(target))
         self.model_result.target_module.is_recall = not learn
-        self.sim.run(self.step_time)
+        self._run_sim(self.step_time)
 
     # single next-word training step
     def train_pair(self, token, target):
@@ -239,7 +257,7 @@ class ModelRuntime:
     # reset context
     def reset_context(self):
         self.model.context_module.reset.output = 1.0
-        self.sim.run(self.step_time)
+        self._run_sim(self.step_time)
         self.model.context_module.reset.output = 0.0
 
     # model checkpoint path

@@ -1,7 +1,5 @@
 # file handling
 import os
-import json
-from datetime import datetime
 from pathlib import Path
 from time import perf_counter
 
@@ -46,6 +44,14 @@ import components.net_comp as nc
 from components.runtime import ModelRuntime
 # evaluation
 from utils.eval import evaluate_model
+from utils.telemetry import (
+    environment_telemetry,
+    evaluation_invocation_estimate,
+    network_telemetry,
+    operator_telemetry,
+    save_telemetry,
+    training_invocation_estimate,
+)
 
 # datasets
 datasets = [reuters]
@@ -60,22 +66,12 @@ def print_timing(label, elapsed):
     print(f"{label + ':':<23}{elapsed:.3f} sec")
 
 
-def save_timing_results(timings):
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().astimezone()
-    result_path = (
-        RESULTS_DIR
-        / f"timing_{timestamp.strftime('%Y%m%d_%H%M%S_%f')}.json"
-    )
-    result = {
-        "timestamp": timestamp.isoformat(),
-        "timings_seconds": timings,
+def invocation_delta(after, before):
+    return {
+        key: after[key] - before[key]
+        for key in after
     }
 
-    with result_path.open("w", encoding="utf-8") as result_file:
-        json.dump(result, result_file, indent=2)
-
-    print(f"\nSaved timing results to: {result_path}")
 
 # seed vocab model path
 SEED_VOCAB_PATH = (
@@ -162,25 +158,68 @@ timings["Model build"] = perf_counter() - start
 start = perf_counter()
 sim = nengo_ocl.Simulator(model_result.model, context=ctx, progress_bar=False)
 timings["Simulator compile"] = perf_counter() - start
+complexity = {
+    "network": network_telemetry(model_result.model),
+    "operators": operator_telemetry(sim),
+}
 
 runtime = ModelRuntime(model_result, sim, model_vocab, step_time=0.02)
+invocation_estimates = {
+    "training": training_invocation_estimate(train_test.training_set),
+    "evaluation": evaluation_invocation_estimate(train_test.testing_set),
+}
 
 # simple test
+training_invocations_before = runtime.simulator_invocation_telemetry()
 start = perf_counter()
 runtime.train_or_load(
     train_test.training_set,
     checkpoint_path="reuters_checkpoint.pkl"
 )
 timings["Training"] = perf_counter() - start
+training_invocations_after = runtime.simulator_invocation_telemetry()
 
 start = perf_counter()
 evaluate_model(runtime, train_test.testing_set)
 timings["Evaluation"] = perf_counter() - start
+evaluation_invocations_after = runtime.simulator_invocation_telemetry()
 
 print("\nRun timings:\n")
 for label, elapsed in timings.items():
     print_timing(label, elapsed)
-save_timing_results(timings)
+telemetry_path = save_telemetry(
+    RESULTS_DIR,
+    {
+        "kind": "model_run",
+        "environment": {
+            **environment_telemetry(),
+            "opencl_platform": platform.name,
+            "opencl_device": device.name,
+        },
+        "parameters": {
+            "sub_lengths": model_result.sub_lengths,
+            "context_length": mp.context_length,
+            "rep_vocab_dim": mp.rep_vocab_dim,
+            "training_restriction": mp.training_restriction,
+            "testing_restriction": mp.testing_restriction,
+        },
+        "timings_seconds": timings,
+        "complexity": complexity,
+        "invocation_estimates": invocation_estimates,
+        "actual_simulator_invocations": {
+            "training": invocation_delta(
+                training_invocations_after,
+                training_invocations_before,
+            ),
+            "evaluation": invocation_delta(
+                evaluation_invocations_after,
+                training_invocations_after,
+            ),
+            "total": evaluation_invocations_after,
+        },
+    },
+)
+print(f"\nSaved run telemetry to: {telemetry_path}")
 
 print("\nSample predictions:\n")
 
