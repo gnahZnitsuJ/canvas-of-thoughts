@@ -167,8 +167,9 @@ class ModelRuntime:
         max_tokens=20
     ):
         print("\nRealtime interactive mode")
-        print("Type 'exit' to quit")
-        print("Type 'reset' to clear context\n")
+        print("Type '/exit' to quit")
+        print("Type '/reset' to clear context")
+        print("Type '/help' to show commands\n")
 
         self.reset_context()
 

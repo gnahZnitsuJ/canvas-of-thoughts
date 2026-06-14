@@ -19,7 +19,7 @@ context_length = 20
 # training impression
 tr_impression = 0.01 # an unrealistic actual impression for time's sake
 # dataset restrictions, number of articles in reuters corpus
-training_restriction = 2000
+training_restriction = 2
 testing_restriction = 2
 
 # model

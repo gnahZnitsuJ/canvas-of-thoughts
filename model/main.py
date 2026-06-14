@@ -1,6 +1,9 @@
 # file handling
 import os
+import json
+from datetime import datetime
 from pathlib import Path
+from time import perf_counter
 
 # for preprocessing of natural language
 # important nltk requisite downloads include: tokenize, reuters
@@ -50,6 +53,29 @@ datasets = [reuters]
 # seed vocab data using training sets of all datasets
 # project root directory
 BASE_DIR = Path(__file__).resolve().parent
+RESULTS_DIR = BASE_DIR / "results"
+
+
+def print_timing(label, elapsed):
+    print(f"{label + ':':<23}{elapsed:.3f} sec")
+
+
+def save_timing_results(timings):
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().astimezone()
+    result_path = (
+        RESULTS_DIR
+        / f"timing_{timestamp.strftime('%Y%m%d_%H%M%S_%f')}.json"
+    )
+    result = {
+        "timestamp": timestamp.isoformat(),
+        "timings_seconds": timings,
+    }
+
+    with result_path.open("w", encoding="utf-8") as result_file:
+        json.dump(result, result_file, indent=2)
+
+    print(f"\nSaved timing results to: {result_path}")
 
 # seed vocab model path
 SEED_VOCAB_PATH = (
@@ -85,10 +111,14 @@ else:
  
 # unique words in training set
 
+timings = {}
+
+start = perf_counter()
 train_test = multiple_data_partition(datasets, 
                                      training_restriction=mp.training_restriction, 
                                      testing_restriction=mp.testing_restriction, 
                                      strict=mp.strict_vocab)
+timings["Data partition"] = perf_counter() - start
 vocab = train_test.vocab
 
 # translated words that can be used in the model
@@ -105,6 +135,7 @@ else:
                           for i in spa_vocab if (i != mp.pad_token and i != mp.unknown_token)}
 
 # vocabulary for our model: store of semantic pointers 
+start = perf_counter()
 model_vocab = spa.Vocabulary(dimensions=mp.rep_vocab_dim, strict=mp.strict_vocab, pointer_gen=None, max_similarity=mp.rep_vocab_max_sim)
 # add unitary vectors for position encoding if using context subsystems
 pos_vec = make_unitary(dim=mp.rep_vocab_dim)
@@ -116,25 +147,40 @@ for i,j in seed_vocab_vectors.items():
 
 # padding and unknown characters
 model_vocab.add(key = mp.pad_token, p = np.zeros(mp.rep_vocab_dim))
+timings["Vocabulary build"] = perf_counter() - start
 
+start = perf_counter()
 model_result = nc.Model(
-    sub_lengths=[2,4,8,16,32,64,128], # sub_lengths=[1,mp.context_length],
+    # sub_lengths=[2,4,8,16,32,64,128],
+    sub_lengths=[1,mp.context_length],
     model_vocab=model_vocab,
     strict=mp.strict_vocab
 )
+timings["Model build"] = perf_counter() - start
 
 # simulator object
+start = perf_counter()
 sim = nengo_ocl.Simulator(model_result.model, context=ctx, progress_bar=False)
+timings["Simulator compile"] = perf_counter() - start
 
 runtime = ModelRuntime(model_result, sim, model_vocab, step_time=0.02)
 
 # simple test
+start = perf_counter()
 runtime.train_or_load(
     train_test.training_set,
     checkpoint_path="reuters_checkpoint.pkl"
 )
+timings["Training"] = perf_counter() - start
 
+start = perf_counter()
 evaluate_model(runtime, train_test.testing_set)
+timings["Evaluation"] = perf_counter() - start
+
+print("\nRun timings:\n")
+for label, elapsed in timings.items():
+    print_timing(label, elapsed)
+save_timing_results(timings)
 
 print("\nSample predictions:\n")
 
