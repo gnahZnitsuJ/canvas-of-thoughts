@@ -1,255 +1,99 @@
-# file handling
-import os
+import sys
 from pathlib import Path
 from time import perf_counter
 
-# for preprocessing of natural language
-# important nltk requisite downloads include: tokenize, reuters
-import nltk
-# reuters articles corpus for training
-from nltk.corpus import reuters
-
-# nengo: see www.nengo.ai
-import nengo
-import nengo_spa as spa
-import matplotlib.pyplot as plt
-# import nengo_dl
-
-# opencl configuration
-import pyopencl as cl
-import nengo_ocl
-platform = cl.get_platforms()[0]
-device = platform.get_devices()[0]
-ctx = cl.Context([device])
-
-# gensim for seed word embedding
-import gensim
-from gensim.models import Word2Vec
-
-# numpy
-import numpy as np
-
-# other string processing
-import re
-
-# data processing functions
-from utils import seed_vocab
-from utils.input import make_unitary
-from utils.processing import WordsToSPAVocab, SPAVocabToWords
-from utils.train_partition import multiple_data_partition, data_partition
-# config
-from config import model_parameters as mp
-# components
-import components.net_comp as nc
-from components.runtime import ModelRuntime
-# evaluation
-from utils.eval import evaluate_model
-from utils.telemetry import (
-    environment_telemetry,
-    evaluation_invocation_estimate,
-    network_telemetry,
-    operator_telemetry,
-    save_telemetry,
-    training_invocation_estimate,
-)
-
-# datasets
-datasets = [reuters]
-
-# seed vocab data using training sets of all datasets
-# project root directory
 BASE_DIR = Path(__file__).resolve().parent
-RESULTS_DIR = BASE_DIR / "results"
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
 
-
-def print_timing(label, elapsed):
-    print(f"{label + ':':<23}{elapsed:.3f} sec")
-
-
-def invocation_delta(after, before):
-    return {
-        key: after[key] - before[key]
-        for key in after
-    }
-
-
-# seed vocab model path
-SEED_VOCAB_PATH = (
-    BASE_DIR
-    / "utils"
-    / "seed_vocab.model"
+from app.args import BENCHMARK_MODE_MAP, parse_args, resolve_workflow
+from app.workflow import (
+    build_model_vocab,
+    build_runtime,
+    build_train_test,
+    load_seed_vocab_model,
+    print_timing,
+    run_demo_predictions,
+    save_run_telemetry,
 )
+from utils.benchmark_compile import benchmark as run_compile_benchmark
+from utils.eval import evaluate_model
 
-# seed vocab data using training sets of all datasets
-if SEED_VOCAB_PATH.is_file():
-    print("seed_vocab.model exists.")
 
-    seed_vocab_model = Word2Vec.load(
-        str(SEED_VOCAB_PATH)
+def main():
+    args = parse_args()
+
+    if args.benchmark:
+        run_compile_benchmark(BENCHMARK_MODE_MAP[args.benchmark])
+        return
+
+    workflow = resolve_workflow(args)
+    timings = {}
+
+    seed_vocab_model = load_seed_vocab_model()
+    train_test = build_train_test(timings)
+    model_vocab = build_model_vocab(seed_vocab_model, train_test.vocab, timings)
+    runtime, model_result, platform, device = build_runtime(model_vocab, timings)
+
+    training_invocations_before = runtime.simulator_invocation_telemetry()
+    training_invocations_after = training_invocations_before
+
+    if workflow["train"]:
+        start = perf_counter()
+        runtime.train_or_load(
+            train_test.training_set,
+            checkpoint_path=args.checkpoint_path,
+            force_retrain=args.force_retrain,
+        )
+        timings["Training"] = perf_counter() - start
+        training_invocations_after = runtime.simulator_invocation_telemetry()
+    elif workflow["eval"] or workflow["demo"] or workflow["interactive"]:
+        runtime.load_checkpoint(args.checkpoint_path)
+
+    evaluation_invocations_after = training_invocations_after
+    if workflow["eval"]:
+        start = perf_counter()
+        evaluate_model(
+            runtime,
+            train_test.testing_set,
+            max_examples=args.max_examples,
+            top_k=args.top_k,
+        )
+        timings["Evaluation"] = perf_counter() - start
+        evaluation_invocations_after = runtime.simulator_invocation_telemetry()
+
+    print("\nRun timings:\n")
+    for label, elapsed in timings.items():
+        print_timing(label, elapsed)
+
+    save_run_telemetry(
+        runtime,
+        model_result,
+        platform,
+        device,
+        timings,
+        train_test,
+        args.max_examples,
+        training_invocations_before,
+        training_invocations_after,
+        evaluation_invocations_after,
     )
 
-else:
-    print("seed_vocab.model does NOT exist.")
-    print("Generating seed vocabulary model...")
-
-    from utils import seed_vocab
-
-    seed_vocab.generate_seed_vocab(datasets)
-
-    if not SEED_VOCAB_PATH.is_file():
-        raise FileNotFoundError(
-            f"Failed to generate {SEED_VOCAB_PATH}"
+    if workflow["demo"]:
+        run_demo_predictions(
+            runtime,
+            train_test.testing_set,
+            max_examples=args.max_demo_examples,
+            top_k=args.top_k,
         )
 
-    seed_vocab_model = Word2Vec.load(
-        str(SEED_VOCAB_PATH)
-    )
- 
-# unique words in training set
-
-timings = {}
-
-start = perf_counter()
-train_test = multiple_data_partition(datasets, 
-                                     training_restriction=mp.training_restriction, 
-                                     testing_restriction=mp.testing_restriction, 
-                                     strict=mp.strict_vocab)
-timings["Data partition"] = perf_counter() - start
-vocab = train_test.vocab
-
-# translated words that can be used in the model
-spa_vocab = WordsToSPAVocab(vocab)
-
-# vectors from seed_vocab
-if mp.strict_vocab == False:
-    # non-strict case: removing pad_token from spa_vocab in seeding vocab
-    seed_vocab_vectors = {i: seed_vocab_model.wv.get_vector(i) 
-                          for i in spa_vocab if i != mp.pad_token}
-else:
-    # strict case: removing pad_token and unknown_token from spa_vocab in seeding vocab
-    seed_vocab_vectors = {i: seed_vocab_model.wv.get_vector(i) 
-                          for i in spa_vocab if (i != mp.pad_token and i != mp.unknown_token)}
-
-# vocabulary for our model: store of semantic pointers 
-start = perf_counter()
-model_vocab = spa.Vocabulary(dimensions=mp.rep_vocab_dim, strict=mp.strict_vocab, pointer_gen=None, max_similarity=mp.rep_vocab_max_sim)
-# add unitary vectors for position encoding if using context subsystems
-pos_vec = make_unitary(dim=mp.rep_vocab_dim)
-model_vocab.add("POS", pos_vec)
-
-# creating vocab keys
-for i,j in seed_vocab_vectors.items():
-    model_vocab.add(key = i, p = j)
-
-# padding and unknown characters
-model_vocab.add(key = mp.pad_token, p = np.zeros(mp.rep_vocab_dim))
-timings["Vocabulary build"] = perf_counter() - start
-
-start = perf_counter()
-model_result = nc.Model(
-    # sub_lengths=[2,4,8,16,32,64,128],
-    sub_lengths=[1,mp.context_length],
-    model_vocab=model_vocab,
-    strict=mp.strict_vocab
-)
-timings["Model build"] = perf_counter() - start
-
-# simulator object
-start = perf_counter()
-sim = nengo_ocl.Simulator(model_result.model, context=ctx, progress_bar=False)
-timings["Simulator compile"] = perf_counter() - start
-complexity = {
-    "network": network_telemetry(model_result.model),
-    "operators": operator_telemetry(sim),
-}
-
-runtime = ModelRuntime(model_result, sim, model_vocab, step_time=0.02)
-invocation_estimates = {
-    "training": training_invocation_estimate(train_test.training_set),
-    "evaluation": evaluation_invocation_estimate(train_test.testing_set),
-}
-
-# simple test
-training_invocations_before = runtime.simulator_invocation_telemetry()
-start = perf_counter()
-runtime.train_or_load(
-    train_test.training_set,
-    checkpoint_path="reuters_checkpoint.pkl"
-)
-timings["Training"] = perf_counter() - start
-training_invocations_after = runtime.simulator_invocation_telemetry()
-
-start = perf_counter()
-evaluate_model(runtime, train_test.testing_set)
-timings["Evaluation"] = perf_counter() - start
-evaluation_invocations_after = runtime.simulator_invocation_telemetry()
-
-print("\nRun timings:\n")
-for label, elapsed in timings.items():
-    print_timing(label, elapsed)
-telemetry_path = save_telemetry(
-    RESULTS_DIR,
-    {
-        "kind": "model_run",
-        "environment": {
-            **environment_telemetry(),
-            "opencl_platform": platform.name,
-            "opencl_device": device.name,
-        },
-        "parameters": {
-            "sub_lengths": model_result.sub_lengths,
-            "context_length": mp.context_length,
-            "rep_vocab_dim": mp.rep_vocab_dim,
-            "training_restriction": mp.training_restriction,
-            "testing_restriction": mp.testing_restriction,
-        },
-        "timings_seconds": timings,
-        "complexity": complexity,
-        "invocation_estimates": invocation_estimates,
-        "actual_simulator_invocations": {
-            "training": invocation_delta(
-                training_invocations_after,
-                training_invocations_before,
-            ),
-            "evaluation": invocation_delta(
-                evaluation_invocations_after,
-                training_invocations_after,
-            ),
-            "total": evaluation_invocations_after,
-        },
-    },
-)
-print(f"\nSaved run telemetry to: {telemetry_path}")
-
-print("\nSample predictions:\n")
-
-demo_count = 0
-max_demo_examples = 10
-
-for tokens in train_test.testing_set:
-    if len(tokens) < 2:
-        continue
-
-    for i in range(len(tokens) - 1):
-        prefix = tokens[:i+1]
-        target = tokens[i+1]
-        predictions = runtime.predict_next_sequence(prefix, top_k=3)
-        prediction_text = ", ".join(
-            f"{word} ({score:.3f})" for word, score in predictions
+    if workflow["interactive"]:
+        runtime.interactive_loop(
+            top_k=args.top_k,
+            generate=args.generate,
+            max_tokens=args.max_tokens,
         )
 
-        print(f"{' '.join(prefix)} -> {prediction_text} | target: {target}")
 
-        demo_count += 1
-        if demo_count >= max_demo_examples:
-            break
-
-    if demo_count >= max_demo_examples:
-        break
-
-# interactive component
-runtime.interactive_loop(
-    top_k=5,
-    generate=True,
-    max_tokens=15
-)
+if __name__ == "__main__":
+    main()
