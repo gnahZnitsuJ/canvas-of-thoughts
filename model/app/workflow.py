@@ -213,3 +213,34 @@ def save_run_telemetry(
         },
     )
     print(f"\nSaved run telemetry to: {telemetry_path}")
+
+
+def maybe_save_run_telemetry(
+    telemetry_enabled,
+    runtime,
+    model_result,
+    platform,
+    device,
+    timings,
+    train_test,
+    max_examples,
+    training_invocations_before,
+    training_invocations_after,
+    evaluation_invocations_after,
+):
+    if not telemetry_enabled:
+        print("\nTelemetry recording disabled for this run.")
+        return
+
+    save_run_telemetry(
+        runtime,
+        model_result,
+        platform,
+        device,
+        timings,
+        train_test,
+        max_examples,
+        training_invocations_before,
+        training_invocations_after,
+        evaluation_invocations_after,
+    )

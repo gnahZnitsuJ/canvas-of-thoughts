@@ -12,9 +12,9 @@ from app.workflow import (
     build_runtime,
     build_train_test,
     load_seed_vocab_model,
+    maybe_save_run_telemetry,
     print_timing,
     run_demo_predictions,
-    save_run_telemetry,
 )
 from utils.benchmark_compile import benchmark as run_compile_benchmark
 from utils.eval import evaluate_model
@@ -66,7 +66,8 @@ def main():
     for label, elapsed in timings.items():
         print_timing(label, elapsed)
 
-    save_run_telemetry(
+    maybe_save_run_telemetry(
+        not args.no_telemetry,
         runtime,
         model_result,
         platform,

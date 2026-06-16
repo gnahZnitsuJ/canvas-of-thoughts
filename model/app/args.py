@@ -83,6 +83,11 @@ def parse_args():
         default=15,
         help="Maximum generated tokens in interactive mode.",
     )
+    parser.add_argument(
+        "--no-telemetry",
+        action="store_true",
+        help="Disable telemetry recording and results-file output for this run.",
+    )
     return parser.parse_args()
 
 

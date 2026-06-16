@@ -24,6 +24,8 @@ class ModelRuntime:
         self.sim_run_count = 0
         self.sim_run_seconds = 0.0
         self.simulated_seconds = 0.0
+        self.present_calls = 0
+        self.reset_context_calls = 0
 
     def _run_sim(self, duration):
         start = perf_counter()
@@ -34,6 +36,8 @@ class ModelRuntime:
 
     def simulator_invocation_telemetry(self):
         return {
+            "present_calls": self.present_calls,
+            "reset_context_calls": self.reset_context_calls,
             "sim_run_count": self.sim_run_count,
             "sim_run_seconds": self.sim_run_seconds,
             "simulated_seconds": self.simulated_seconds,
@@ -72,6 +76,7 @@ class ModelRuntime:
 
     # present input and optional target vectors, then run the simulator forward
     def present(self, token, target=None, learn=False):
+        self.present_calls += 1
         vec = self._vector_for(token)
         self.model_result.input_module.set(vec)
         if target is None:
@@ -256,6 +261,7 @@ class ModelRuntime:
 
     # reset context
     def reset_context(self):
+        self.reset_context_calls += 1
         self.model.context_module.reset.output = 1.0
         self._run_sim(self.step_time)
         self.model.context_module.reset.output = 0.0

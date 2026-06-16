@@ -13,11 +13,20 @@ python model/main.py
 That default path trains or loads the model, records telemetry, and stops before
 evaluation, demo prediction dumps, or interactive mode.
 
+If you want the leanest normal run and do not need a results file, add
+`--no-telemetry` to skip telemetry recording entirely.
+
 Use `--full` when you want the original end-to-end behavior:
 
 ```bash
 python model/main.py --full
 ```
+
+This runs the whole user-facing workflow in one go:
+- train or load a checkpoint
+- run evaluation
+- print sample next-token predictions
+- launch interactive mode
 
 You can now run individual stages during development:
 
@@ -28,6 +37,22 @@ python model/main.py --demo --max-demo-examples 10 --top-k 3
 python model/main.py --interactive --generate --top-k 5 --max-tokens 15
 ```
 
+- `python model/main.py --train --no-eval --no-demo --no-interactive`
+  trains or loads the model, writes telemetry, and exits. This is the most useful
+  quick smoke-test path when you want to verify that the model still builds and
+  checkpoint loading still works.
+- `python model/main.py --eval --max-examples 50`
+  loads the checkpoint, evaluates up to `50` next-token prediction examples, prints
+  the evaluation result, records telemetry, and exits.
+- `python model/main.py --demo --max-demo-examples 10 --top-k 3`
+  loads the checkpoint and prints up to `10` human-readable sample predictions with
+  the top `3` candidates for each prefix. This is useful for a quick qualitative
+  check of model behavior.
+- `python model/main.py --interactive --generate --top-k 5 --max-tokens 15`
+  loads the checkpoint and opens the realtime prompt. With `--generate`, the model
+  continues autoregressively after your prompt, showing up to `5` candidates per
+  step and stopping after `15` generated tokens unless you end earlier.
+
 Compile benchmark modes are available directly from `main.py`:
 
 ```bash
@@ -36,19 +61,42 @@ python model/main.py --benchmark compile-components
 python model/main.py --benchmark compile-full
 ```
 
+- `compile-current`
+  benchmarks the current model configuration and records compile/build telemetry for
+  the main architecture as it is currently set up.
+- `compile-components`
+  runs component-level benchmark cases so you can compare the relative cost of
+  pieces like `ContextModule`, `BaseComponent`, and related structures.
+- `compile-full`
+  runs the broader benchmark suite, including scaling-oriented cases, for deeper
+  compile-time investigation.
+
 Useful flags:
 
 - `--full`
+  run the full workflow instead of the cheaper default path
 - `--checkpoint-path PATH`
+  choose which checkpoint file to load or write under `model/checkpoints/`
 - `--force-retrain`
+  ignore an existing checkpoint and retrain from scratch
 - `--max-examples N`
+  cap how many evaluation examples are processed
 - `--max-demo-examples N`
+  cap how many demo predictions are printed
 - `--top-k N`
+  choose how many candidate predictions to show in evaluation, demo output, and interactive mode
 - `--generate`
+  enable autoregressive generation in interactive mode
 - `--max-tokens N`
+  limit how many tokens interactive generation may continue for
+- `--no-telemetry`
+  disable telemetry recording and skip writing a `telemetry_*.json` results file for the run
 - `--no-eval`
+  skip evaluation when using a workflow that would otherwise include it
 - `--no-demo`
+  skip demo prediction output when using a workflow that would otherwise include it
 - `--no-interactive`
+  skip the interactive prompt when using a workflow that would otherwise include it
 
 ## Interactive Commands
 
@@ -60,3 +108,6 @@ Inside interactive mode, slash commands are supported:
 - `/quit`
 
 Telemetry is written locally to `model/results/` as timestamped `telemetry_*.json` files.
+These files now include aggregate simulator activity plus explicit
+`present_calls` and `reset_context_calls`. Use `--no-telemetry` to skip this
+recording when you want the leanest run possible.
