@@ -24,7 +24,11 @@ def main():
     args = parse_args()
 
     if args.benchmark:
-        run_compile_benchmark(BENCHMARK_MODE_MAP[args.benchmark])
+        run_compile_benchmark(
+            BENCHMARK_MODE_MAP[args.benchmark],
+            platform_index=args.opencl_platform_index,
+            device_index=args.opencl_device_index,
+        )
         return
 
     workflow = resolve_workflow(args)
@@ -33,7 +37,12 @@ def main():
     seed_vocab_model = load_seed_vocab_model()
     train_test = build_train_test(timings)
     model_vocab = build_model_vocab(seed_vocab_model, train_test.vocab, timings)
-    runtime, model_result, platform, device = build_runtime(model_vocab, timings)
+    runtime, model_result, platform, device, opencl_selection = build_runtime(
+        model_vocab,
+        timings,
+        opencl_platform_index=args.opencl_platform_index,
+        opencl_device_index=args.opencl_device_index,
+    )
 
     training_invocations_before = runtime.simulator_invocation_telemetry()
     training_invocations_after = training_invocations_before
@@ -72,6 +81,7 @@ def main():
         model_result,
         platform,
         device,
+        opencl_selection,
         timings,
         train_test,
         args.max_examples,

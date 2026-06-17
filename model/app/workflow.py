@@ -4,7 +4,6 @@ from time import perf_counter
 import nengo_ocl
 import nengo_spa as spa
 import numpy as np
-import pyopencl as cl
 from gensim.models import Word2Vec
 from nltk.corpus import reuters
 
@@ -13,6 +12,7 @@ from components.runtime import ModelRuntime
 from config import model_parameters as mp
 from utils import seed_vocab
 from utils.input import make_unitary
+from utils.opencl import print_opencl_selection, select_opencl_device
 from utils.processing import WordsToSPAVocab
 from utils.telemetry import (
     environment_telemetry,
@@ -104,7 +104,12 @@ def build_model_vocab(seed_vocab_model, vocab, timings):
     return model_vocab
 
 
-def build_runtime(model_vocab, timings):
+def build_runtime(
+    model_vocab,
+    timings,
+    opencl_platform_index=None,
+    opencl_device_index=None,
+):
     start = perf_counter()
     model_result = nc.Model(
         sub_lengths=[1, mp.context_length],
@@ -113,9 +118,14 @@ def build_runtime(model_vocab, timings):
     )
     timings["Model build"] = perf_counter() - start
 
-    platform = cl.get_platforms()[0]
-    device = platform.get_devices()[0]
-    context = cl.Context([device])
+    opencl_selection = select_opencl_device(
+        platform_index=opencl_platform_index,
+        device_index=opencl_device_index,
+    )
+    print_opencl_selection(opencl_selection)
+    platform = opencl_selection["platform"]
+    device = opencl_selection["device"]
+    context = opencl_selection["context"]
 
     start = perf_counter()
     sim = nengo_ocl.Simulator(
@@ -131,7 +141,7 @@ def build_runtime(model_vocab, timings):
         model_vocab,
         step_time=0.02,
     )
-    return runtime, model_result, platform, device
+    return runtime, model_result, platform, device, opencl_selection
 
 
 def run_demo_predictions(runtime, testing_set, max_examples, top_k):
@@ -161,6 +171,7 @@ def save_run_telemetry(
     model_result,
     platform,
     device,
+    opencl_selection,
     timings,
     train_test,
     max_examples,
@@ -188,6 +199,8 @@ def save_run_telemetry(
                 **environment_telemetry(),
                 "opencl_platform": platform.name,
                 "opencl_device": device.name,
+                "opencl_platform_index": opencl_selection["platform_index"],
+                "opencl_device_index": opencl_selection["device_index"],
             },
             "parameters": {
                 "sub_lengths": model_result.sub_lengths,
@@ -221,6 +234,7 @@ def maybe_save_run_telemetry(
     model_result,
     platform,
     device,
+    opencl_selection,
     timings,
     train_test,
     max_examples,
@@ -237,6 +251,7 @@ def maybe_save_run_telemetry(
         model_result,
         platform,
         device,
+        opencl_selection,
         timings,
         train_test,
         max_examples,

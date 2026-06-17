@@ -88,6 +88,22 @@ def parse_args():
         action="store_true",
         help="Disable telemetry recording and results-file output for this run.",
     )
+    parser.add_argument(
+        "--opencl-platform-index",
+        type=int,
+        help=(
+            "Explicit OpenCL platform index. Defaults to "
+            "CANVAS_OPENCL_PLATFORM_INDEX if set, otherwise 0."
+        ),
+    )
+    parser.add_argument(
+        "--opencl-device-index",
+        type=int,
+        help=(
+            "Explicit OpenCL device index within the selected platform. "
+            "Defaults to CANVAS_OPENCL_DEVICE_INDEX if set, otherwise 0."
+        ),
+    )
     return parser.parse_args()
 
 

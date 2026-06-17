@@ -35,6 +35,7 @@ python model/main.py --train --no-eval --no-demo --no-interactive
 python model/main.py --eval --max-examples 50
 python model/main.py --demo --max-demo-examples 10 --top-k 3
 python model/main.py --interactive --generate --top-k 5 --max-tokens 15
+python model/main.py --train --no-eval --opencl-platform-index 0 --opencl-device-index 0
 ```
 
 - `python model/main.py --train --no-eval --no-demo --no-interactive`
@@ -52,6 +53,9 @@ python model/main.py --interactive --generate --top-k 5 --max-tokens 15
   loads the checkpoint and opens the realtime prompt. With `--generate`, the model
   continues autoregressively after your prompt, showing up to `5` candidates per
   step and stopping after `15` generated tokens unless you end earlier.
+- `python model/main.py --train --no-eval --opencl-platform-index 0 --opencl-device-index 0`
+  runs the normal workflow but pins execution to a specific OpenCL platform and
+  device index, which is useful on machines with multiple OpenCL providers.
 
 Compile benchmark modes are available directly from `main.py`:
 
@@ -71,6 +75,11 @@ python model/main.py --benchmark compile-full
   runs the broader benchmark suite, including scaling-oriented cases, for deeper
   compile-time investigation.
 
+Benchmark runs now produce both:
+- raw timestamped telemetry JSON in `model/results/`
+- a timestamped markdown summary in `model/results/` that is easier to paste into notes
+- explicit OpenCL platform/device reporting in both console output and saved telemetry
+
 Useful flags:
 
 - `--full`
@@ -89,6 +98,10 @@ Useful flags:
   enable autoregressive generation in interactive mode
 - `--max-tokens N`
   limit how many tokens interactive generation may continue for
+- `--opencl-platform-index N`
+  choose which OpenCL platform index to use; defaults to `CANVAS_OPENCL_PLATFORM_INDEX` if set, otherwise `0`
+- `--opencl-device-index N`
+  choose which device index to use within the selected OpenCL platform; defaults to `CANVAS_OPENCL_DEVICE_INDEX` if set, otherwise `0`
 - `--no-telemetry`
   disable telemetry recording and skip writing a `telemetry_*.json` results file for the run
 - `--no-eval`
@@ -111,3 +124,9 @@ Telemetry is written locally to `model/results/` as timestamped `telemetry_*.jso
 These files now include aggregate simulator activity plus explicit
 `present_calls` and `reset_context_calls`. Use `--no-telemetry` to skip this
 recording when you want the leanest run possible.
+
+OpenCL selection can also be controlled through environment variables:
+- `CANVAS_OPENCL_PLATFORM_INDEX`
+- `CANVAS_OPENCL_DEVICE_INDEX`
+
+CLI flags take precedence over those environment defaults.

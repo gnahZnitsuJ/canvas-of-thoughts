@@ -28,6 +28,21 @@ def save_telemetry(results_dir, payload, prefix="telemetry"):
     return result_path
 
 
+def save_text_artifact(results_dir, text, prefix="summary", suffix=".md"):
+    results_dir = Path(results_dir)
+    results_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = _timestamp()
+    artifact_path = (
+        results_dir
+        / f"{prefix}_{timestamp.strftime('%Y%m%d_%H%M%S_%f')}{suffix}"
+    )
+
+    with artifact_path.open("w", encoding="utf-8") as artifact_file:
+        artifact_file.write(text)
+
+    return artifact_path
+
+
 def environment_telemetry():
     return {
         "python": platform.python_version(),
@@ -149,3 +164,158 @@ def evaluation_invocation_estimate(sequences, max_examples=50):
         "estimated_eval_presentation_runs": presentation_runs,
         "estimated_eval_sim_runs": reset_runs + presentation_runs,
     }
+
+
+def _format_seconds(value):
+    return f"{value:.3f}"
+
+
+def _format_int(value):
+    return f"{value:,}"
+
+
+def _row_to_markdown(row):
+    return "| " + " | ".join(row) + " |"
+
+
+def _case_row(case, include_sub_lengths=True):
+    network = case["network"]
+    operators = case["operators"]
+    row = [
+        case["name"],
+        case["simulator"],
+    ]
+
+    if include_sub_lengths:
+        sub_lengths = case.get("sub_lengths")
+        row.append(",".join(str(length) for length in sub_lengths) if sub_lengths else "-")
+        row.append(str(case.get("context_length", "-")))
+
+    row.extend(
+        [
+            str(case["rep_vocab_dim"]),
+            _format_seconds(case["model_build_seconds"]),
+            _format_seconds(case["simulator_compile_seconds"]),
+            _format_int(operators["operator_count"]),
+            _format_int(network["ensemble_count"]),
+            _format_int(network["neuron_count"]),
+        ]
+    )
+    return row
+
+
+def render_compile_benchmark_summary(payload, telemetry_path=None):
+    lines = [
+        "# Compile Benchmark Summary",
+        "",
+        f"- Kind: `{payload['kind']}`",
+    ]
+
+    if telemetry_path is not None:
+        lines.append(f"- Raw telemetry: `{Path(telemetry_path).name}`")
+
+    environment = payload.get("environment", {})
+    if environment:
+        lines.extend(
+            [
+                f"- OpenCL platform: `{environment.get('opencl_platform', 'unknown')}`",
+                f"- OpenCL device: `{environment.get('opencl_device', 'unknown')}`",
+            ]
+        )
+
+    sections = [
+        ("Scaling", payload.get("scaling", []), True),
+        ("Simulator Comparison", payload.get("simulator_comparison", []), True),
+        ("Component Costs", payload.get("component_costs", []), False),
+    ]
+
+    for title, cases, include_sub_lengths in sections:
+        if not cases:
+            continue
+
+        lines.extend(["", f"## {title}", ""])
+
+        if include_sub_lengths:
+            header = [
+                "case",
+                "sim",
+                "sub_lengths",
+                "context_length",
+                "dim",
+                "model_build_s",
+                "compile_s",
+                "operators",
+                "ensembles",
+                "neurons",
+            ]
+        else:
+            header = [
+                "case",
+                "sim",
+                "dim",
+                "model_build_s",
+                "compile_s",
+                "operators",
+                "ensembles",
+                "neurons",
+            ]
+
+        divider = ["---"] * len(header)
+        lines.append(_row_to_markdown(header))
+        lines.append(_row_to_markdown(divider))
+        for case in cases:
+            lines.append(_row_to_markdown(_case_row(case, include_sub_lengths)))
+
+    return "\n".join(lines) + "\n"
+
+
+def print_compile_benchmark_summary(payload):
+    sections = [
+        ("Scaling", payload.get("scaling", []), True),
+        ("Simulator Comparison", payload.get("simulator_comparison", []), True),
+        ("Component Costs", payload.get("component_costs", []), False),
+    ]
+
+    for title, cases, include_sub_lengths in sections:
+        if not cases:
+            continue
+
+        print(f"\n{title}:")
+        if include_sub_lengths:
+            header = (
+                f"{'case':<20} {'sim':<10} {'sub_lengths':<14} "
+                f"{'ctx':>5} {'dim':>5} {'build_s':>9} {'compile_s':>10} "
+                f"{'ops':>10} {'ens':>8}"
+            )
+            print(header)
+            print("-" * len(header))
+            for case in cases:
+                sub_lengths = ",".join(str(length) for length in case["sub_lengths"])
+                print(
+                    f"{case['name']:<20} "
+                    f"{case['simulator']:<10} "
+                    f"{sub_lengths:<14} "
+                    f"{case['context_length']:>5} "
+                    f"{case['rep_vocab_dim']:>5} "
+                    f"{case['model_build_seconds']:>9.3f} "
+                    f"{case['simulator_compile_seconds']:>10.3f} "
+                    f"{case['operators']['operator_count']:>10,} "
+                    f"{case['network']['ensemble_count']:>8,}"
+                )
+        else:
+            header = (
+                f"{'case':<20} {'sim':<10} {'dim':>5} {'build_s':>9} "
+                f"{'compile_s':>10} {'ops':>10} {'ens':>8}"
+            )
+            print(header)
+            print("-" * len(header))
+            for case in cases:
+                print(
+                    f"{case['name']:<20} "
+                    f"{case['simulator']:<10} "
+                    f"{case['rep_vocab_dim']:>5} "
+                    f"{case['model_build_seconds']:>9.3f} "
+                    f"{case['simulator_compile_seconds']:>10.3f} "
+                    f"{case['operators']['operator_count']:>10,} "
+                    f"{case['network']['ensemble_count']:>8,}"
+                )

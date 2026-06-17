@@ -15,17 +15,20 @@ import nengo
 import nengo_ocl
 import nengo_spa as spa
 import numpy as np
-import pyopencl as cl
 
 import components.net_comp as nc
 import components.net_classes as ncls
 from config import model_parameters as mp
 from utils.input import InputModule
+from utils.opencl import print_opencl_selection, select_opencl_device
 from utils.telemetry import (
     environment_telemetry,
     network_telemetry,
     operator_telemetry,
+    print_compile_benchmark_summary,
+    render_compile_benchmark_summary,
     save_telemetry,
+    save_text_artifact,
 )
 
 
@@ -129,10 +132,15 @@ def build_base_component(vocab):
     return network
 
 
-def benchmark(mode):
-    platform = cl.get_platforms()[0]
-    device = platform.get_devices()[0]
-    context = cl.Context([device])
+def benchmark(mode, platform_index=None, device_index=None):
+    opencl_selection = select_opencl_device(
+        platform_index=platform_index,
+        device_index=device_index,
+    )
+    print_opencl_selection(opencl_selection)
+    platform = opencl_selection["platform"]
+    device = opencl_selection["device"]
+    context = opencl_selection["context"]
 
     scaling_cases = [
         ("baseline", [1, 20], 64),
@@ -187,13 +195,26 @@ def benchmark(mode):
             **environment_telemetry(),
             "opencl_platform": platform.name,
             "opencl_device": device.name,
+            "opencl_platform_index": opencl_selection["platform_index"],
+            "opencl_device_index": opencl_selection["device_index"],
         },
         "scaling": scaling,
         "simulator_comparison": simulator_comparison,
         "component_costs": component_costs,
     }
     result_path = save_telemetry(RESULTS_DIR, payload)
+    summary_text = render_compile_benchmark_summary(
+        payload,
+        telemetry_path=result_path,
+    )
+    summary_path = save_text_artifact(
+        RESULTS_DIR,
+        summary_text,
+        prefix="summary",
+    )
+    print_compile_benchmark_summary(payload)
     print(f"Saved compile benchmark telemetry to: {result_path}")
+    print(f"Saved compile benchmark summary to: {summary_path}")
 
 
 if __name__ == "__main__":
@@ -203,5 +224,25 @@ if __name__ == "__main__":
         choices=("full", "components", "current"),
         default="full",
     )
+    parser.add_argument(
+        "--platform-index",
+        type=int,
+        help=(
+            "Explicit OpenCL platform index. Defaults to "
+            "CANVAS_OPENCL_PLATFORM_INDEX if set, otherwise 0."
+        ),
+    )
+    parser.add_argument(
+        "--device-index",
+        type=int,
+        help=(
+            "Explicit OpenCL device index within the selected platform. "
+            "Defaults to CANVAS_OPENCL_DEVICE_INDEX if set, otherwise 0."
+        ),
+    )
     args = parser.parse_args()
-    benchmark(args.mode)
+    benchmark(
+        args.mode,
+        platform_index=args.platform_index,
+        device_index=args.device_index,
+    )
