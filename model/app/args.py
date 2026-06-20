@@ -1,3 +1,5 @@
+"""CLI argument parsing and workflow-mode resolution for model/main.py."""
+
 import argparse
 
 BENCHMARK_MODE_MAP = {
@@ -8,6 +10,7 @@ BENCHMARK_MODE_MAP = {
 
 
 def parse_args():
+    """Build and parse the top-level CLI for normal runs and benchmarks."""
     parser = argparse.ArgumentParser(
         description="Run the Nengo language-model workflow."
     )
@@ -108,6 +111,7 @@ def parse_args():
 
 
 def resolve_workflow(args):
+    """Translate raw CLI flags into the concrete stages this run should execute."""
     explicit_workflow = any(
         [
             args.full,

@@ -1,3 +1,5 @@
+"""Shared OpenCL device-selection helpers for normal runs and benchmarks."""
+
 import os
 
 import pyopencl as cl
@@ -7,6 +9,7 @@ OPENCL_DEVICE_ENV = "CANVAS_OPENCL_DEVICE_INDEX"
 
 
 def _read_optional_int_env(name):
+    """Read an integer environment variable, treating empty/unset as missing."""
     value = os.getenv(name)
     if value is None or value == "":
         return None
@@ -20,6 +23,7 @@ def _read_optional_int_env(name):
 
 
 def _resolve_index(cli_value, env_name, default):
+    """Resolve an index using CLI value first, then environment, then default."""
     if cli_value is not None:
         return cli_value
 
@@ -31,6 +35,7 @@ def _resolve_index(cli_value, env_name, default):
 
 
 def select_opencl_device(platform_index=None, device_index=None):
+    """Pick one OpenCL platform/device pair and build a context for it."""
     platforms = cl.get_platforms()
     selected_platform_index = _resolve_index(
         platform_index,
@@ -45,6 +50,8 @@ def select_opencl_device(platform_index=None, device_index=None):
             f"0..{len(platforms) - 1}"
         )
 
+    # We validate indices explicitly so failures are easier to understand than
+    # the default pyopencl exceptions.
     platform = platforms[selected_platform_index]
     devices = platform.get_devices()
     selected_device_index = _resolve_index(
@@ -73,6 +80,7 @@ def select_opencl_device(platform_index=None, device_index=None):
 
 
 def print_opencl_selection(selection):
+    """Print the chosen OpenCL platform/device in a human-readable way."""
     print("\nOpenCL selection:")
     print(
         f"Platform [{selection['platform_index']}]: "

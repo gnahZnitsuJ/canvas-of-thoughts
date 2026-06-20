@@ -1,3 +1,5 @@
+"""High-level workflow helpers used by the main model CLI entrypoint."""
+
 from pathlib import Path
 from time import perf_counter
 
@@ -31,10 +33,12 @@ DATASETS = [reuters]
 
 
 def print_timing(label, elapsed):
+    """Print one timing line using the same alignment as the rest of the CLI."""
     print(f"{label + ':':<23}{elapsed:.3f} sec")
 
 
 def invocation_delta(after, before):
+    """Compute per-phase deltas from cumulative runtime invocation counters."""
     return {
         key: after[key] - before[key]
         for key in after
@@ -42,6 +46,7 @@ def invocation_delta(after, before):
 
 
 def load_seed_vocab_model():
+    """Load the cached seed Word2Vec model, generating it once if needed."""
     if SEED_VOCAB_PATH.is_file():
         print("seed_vocab.model exists.")
         return Word2Vec.load(str(SEED_VOCAB_PATH))
@@ -59,6 +64,7 @@ def load_seed_vocab_model():
 
 
 def build_train_test(timings):
+    """Partition datasets into train/test sequences and record partition time."""
     start = perf_counter()
     train_test = multiple_data_partition(
         DATASETS,
@@ -71,6 +77,7 @@ def build_train_test(timings):
 
 
 def build_model_vocab(seed_vocab_model, vocab, timings):
+    """Construct the SPA vocabulary used by the Nengo model for this run."""
     spa_vocab = WordsToSPAVocab(vocab)
 
     if not mp.strict_vocab:
@@ -86,6 +93,8 @@ def build_model_vocab(seed_vocab_model, vocab, timings):
             if token not in (mp.pad_token, mp.unknown_token)
         }
 
+    # Seed the runtime vocabulary from the Word2Vec model, then add the
+    # special vectors the architecture expects explicitly.
     start = perf_counter()
     model_vocab = spa.Vocabulary(
         dimensions=mp.rep_vocab_dim,
@@ -110,14 +119,17 @@ def build_runtime(
     opencl_platform_index=None,
     opencl_device_index=None,
 ):
+    """Build the model, select an OpenCL device, and compile the simulator."""
     start = perf_counter()
     model_result = nc.Model(
-        sub_lengths=[1, mp.context_length],
+        sub_lengths=[1, mp.context_length], # model architecture arguments here
         model_vocab=model_vocab,
         strict=mp.strict_vocab,
     )
     timings["Model build"] = perf_counter() - start
 
+    # Device selection is shared with benchmarks so normal runs and profiling
+    # runs use the same indexing rules and environment-variable fallbacks.
     opencl_selection = select_opencl_device(
         platform_index=opencl_platform_index,
         device_index=opencl_device_index,
@@ -145,6 +157,7 @@ def build_runtime(
 
 
 def run_demo_predictions(runtime, testing_set, max_examples, top_k):
+    """Print a small qualitative sample of next-token predictions."""
     print("\nSample predictions:\n")
 
     demo_count = 0
@@ -179,6 +192,7 @@ def save_run_telemetry(
     training_invocations_after,
     evaluation_invocations_after,
 ):
+    """Persist the telemetry payload for a normal workflow run."""
     complexity = {
         "network": network_telemetry(model_result.model),
         "operators": operator_telemetry(runtime.sim),
@@ -191,6 +205,8 @@ def save_run_telemetry(
         ),
     }
 
+    # Store enough context to compare runs later without reopening the code:
+    # environment, model shape, timings, and both estimated and actual sim use.
     telemetry_path = save_telemetry(
         RESULTS_DIR,
         {
@@ -242,6 +258,7 @@ def maybe_save_run_telemetry(
     training_invocations_after,
     evaluation_invocations_after,
 ):
+    """Honor the telemetry toggle while keeping the call site in main.py simple."""
     if not telemetry_enabled:
         print("\nTelemetry recording disabled for this run.")
         return
