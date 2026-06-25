@@ -1,5 +1,6 @@
 __pycache__/
 *.py[cod]
+.agents/
 model/utils/seed_vocab.model
 model/checkpoints/
 model/results/

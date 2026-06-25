@@ -6,21 +6,25 @@ import os
 from datetime import datetime
 from time import perf_counter
 
-# helper class for running the model
+
 class ModelRuntime:
+    """Run training, recall, and checkpoint workflows against a compiled model."""
+
     def __init__(self, model_result, sim, model_vocab, step_time=0.02):
         self.model_result = model_result
         self.model = model_result.model
         self.sim = sim
         self.model_vocab = model_vocab
         self.step_time = step_time
-        # cached vocabulary arrays for nearest-neighbour decoding of predictions
+
+        # Cache normalized vocabulary vectors so prediction decoding stays cheap.
         self.vocab_keys = list(model_vocab.keys())
         self.vocab_vectors = model_vocab.vectors
         self.vocab_norms = np.linalg.norm(self.vocab_vectors, axis=1)
         self.normalized_vocab_vectors = self.vocab_vectors / np.maximum(
             self.vocab_norms[:, None], 1e-12
         )
+
         self.sim_run_count = 0
         self.sim_run_seconds = 0.0
         self.simulated_seconds = 0.0
@@ -28,11 +32,18 @@ class ModelRuntime:
         self.reset_context_calls = 0
 
     def _run_sim(self, duration):
+        """Advance the simulator while tracking invocation telemetry."""
         start = perf_counter()
         self.sim.run(duration)
         self.sim_run_seconds += perf_counter() - start
         self.sim_run_count += 1
         self.simulated_seconds += duration
+
+    def _set_context_reset(self, active):
+        """Toggle reset on every active context module in the current model."""
+        value = 1.0 if active else 0.0
+        for context_module in self.model_result.active_context_modules:
+            context_module.reset_value = value
 
     def simulator_invocation_telemetry(self):
         return {
@@ -74,6 +85,17 @@ class ModelRuntime:
             for idx in top_ids
         ]
 
+    def current_prediction_vector(self):
+        """Read the latest decoded prediction state without advancing the sim."""
+        prediction_samples = self.sim.data[self.model_result.p_pred]
+        if len(prediction_samples) == 0:
+            return np.zeros(self.model_vocab.dimensions)
+        return prediction_samples[-1]
+
+    def current_predictions(self, top_k=3):
+        """Decode the current prediction state into nearest vocabulary items."""
+        return self._top_predictions(self.current_prediction_vector(), top_k=top_k)
+
     # present input and optional target vectors, then run the simulator forward
     def present(self, token, target=None, learn=False):
         self.present_calls += 1
@@ -86,6 +108,13 @@ class ModelRuntime:
         self.model_result.target_module.is_recall = not learn
         self._run_sim(self.step_time)
 
+    def advance_recall(self, token, top_k=None):
+        """Feed one token through the stateful recall path and optionally decode it."""
+        self.present(token, learn=False)
+        if top_k is None:
+            return self.current_prediction_vector()
+        return self.current_predictions(top_k=top_k)
+
     # single next-word training step
     def train_pair(self, token, target):
         self.present(token, target=target, learn=True)
@@ -97,7 +126,7 @@ class ModelRuntime:
 
         for i in range(len(tokens) - 1):
             self.present(tokens[i], learn=False)  # build context
-            self.present(tokens[i], target=tokens[i+1], learn=True)
+            self.present(tokens[i], target=tokens[i + 1], learn=True)
 
     # training across a corpus of token sequences
     def train_corpus(self, sequences):
@@ -107,34 +136,29 @@ class ModelRuntime:
 
     # recall-mode prediction for a single token
     def predict_next(self, token, top_k=3):
-        self.present(token, learn=False)
-        prediction = self.sim.data[self.model_result.p_pred][-1]
-        return self._top_predictions(prediction, top_k=top_k)
+        return self.advance_recall(token, top_k=top_k)
 
     # recall-mode prediction for a sequence of tokens (resets context each time)
     def predict_next_sequence(self, tokens, top_k=3, reset_context=True):
         if reset_context:
             self.reset_context()
-        
-        # reset context implicitly by running fresh sequence
+
         for token in tokens:
             self.present(token, learn=False)
 
-        prediction = self.sim.data[self.model_result.p_pred][-1]
-        return self._top_predictions(prediction, top_k=top_k)
-    
+        return self.current_predictions(top_k=top_k)
+
     def interactive_predict(self, text, top_k=5, reset_context=True):
         tokens = text.strip().split()
 
         if len(tokens) == 0:
             return []
 
-        if reset_context:
-            self.reset_context()
-
-        predictions = self.predict_next_sequence(tokens, top_k=top_k)
-
-        return predictions
+        return self.predict_next_sequence(
+            tokens,
+            top_k=top_k,
+            reset_context=reset_context,
+        )
 
     # autoregressive generation
     def generate(
@@ -143,7 +167,7 @@ class ModelRuntime:
         max_tokens=20,
         top_k=5,
         reset_context=True,
-        verbose=False
+        verbose=False,
     ):
         tokens = prompt.strip().split()
 
@@ -155,19 +179,17 @@ class ModelRuntime:
 
         generated = list(tokens)
 
-        # build initial context
+        # Build initial context once, then keep advancing from current state.
         for token in tokens:
             self.present(token, learn=False)
 
         for _ in range(max_tokens):
-            prediction = self.sim.data[self.model_result.p_pred][-1]
-            top_predictions = self._top_predictions(prediction, top_k=top_k)
+            top_predictions = self.current_predictions(top_k=top_k)
 
             if len(top_predictions) == 0:
                 break
 
             next_token = top_predictions[0][0]
-
             generated.append(next_token)
 
             if verbose:
@@ -177,7 +199,7 @@ class ModelRuntime:
                 )
                 print(f"next -> {prediction_text}")
 
-            # feed prediction back into network
+            # Feed prediction back into the same stateful context path.
             self.present(next_token, learn=False)
 
         return generated
@@ -187,7 +209,7 @@ class ModelRuntime:
         self,
         top_k=5,
         generate=False,
-        max_tokens=20
+        max_tokens=20,
     ):
         print("\nRealtime interactive mode")
         print("Type '/exit' to quit")
@@ -230,7 +252,7 @@ class ModelRuntime:
                         max_tokens=max_tokens,
                         top_k=top_k,
                         reset_context=False,
-                        verbose=False
+                        verbose=False,
                     )
 
                     print("generated:")
@@ -240,7 +262,7 @@ class ModelRuntime:
                     predictions = self.interactive_predict(
                         text,
                         top_k=top_k,
-                        reset_context=False
+                        reset_context=False,
                     )
 
                     if len(predictions) == 0:
@@ -262,9 +284,9 @@ class ModelRuntime:
     # reset context
     def reset_context(self):
         self.reset_context_calls += 1
-        self.model.context_module.reset.output = 1.0
+        self._set_context_reset(True)
         self._run_sim(self.step_time)
-        self.model.context_module.reset.output = 0.0
+        self._set_context_reset(False)
 
     # model checkpoint path
     def _resolve_checkpoint_path(self, filename):
@@ -282,8 +304,7 @@ class ModelRuntime:
             "vocab_dim": self.model_vocab.dimensions,
             "strict_vocab": self.model_result.strict,
             "step_time": self.step_time,
-            "num_learning_connections":
-                len(self.model_result.learning_connections),
+            "num_learning_connections": len(self.model_result.learning_connections),
             "learning_shapes": [
                 tuple(self.sim.data[conn].weights.shape)
                 for conn in self.model_result.learning_connections
@@ -337,9 +358,7 @@ class ModelRuntime:
         full_path = self._resolve_checkpoint_path(path)
 
         if not os.path.isfile(full_path):
-            raise FileNotFoundError(
-                f"Checkpoint not found: {path}"
-            )
+            raise FileNotFoundError(f"Checkpoint not found: {path}")
 
         with open(full_path, "rb") as f:
             checkpoint = pickle.load(f)
@@ -368,30 +387,22 @@ class ModelRuntime:
                 f"found {actual}"
             )
 
-        for conn, weights in zip(
-            self.model_result.learning_connections,
-            saved_weights
-        ):
+        for conn, weights in zip(self.model_result.learning_connections, saved_weights):
             self._restore_connection_weights(conn, weights)
 
         print(f"\nLoaded checkpoint from: {full_path}")
         print(f"Checkpoint timestamp: {metadata['timestamp']}")
-    
+
     # decide whether to train new model or load existing model
     def train_or_load(
         self,
         sequences,
         checkpoint_path="checkpoint.pkl",
-        force_retrain=False
+        force_retrain=False,
     ):
-        full_path = self._resolve_checkpoint_path(
-            checkpoint_path
-        )
+        full_path = self._resolve_checkpoint_path(checkpoint_path)
 
-        if (
-            not force_retrain
-            and os.path.isfile(full_path)
-        ):
+        if not force_retrain and os.path.isfile(full_path):
             print("\nCheckpoint found. Loading...")
             self.load_checkpoint(checkpoint_path)
 

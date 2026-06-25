@@ -13,6 +13,7 @@ import components.net_comp as nc
 from components.runtime import ModelRuntime
 from config import model_parameters as mp
 from utils import seed_vocab
+from utils.eval import iter_next_token_predictions
 from utils.input import make_unitary
 from utils.opencl import print_opencl_selection, select_opencl_device
 from utils.processing import WordsToSPAVocab
@@ -39,10 +40,7 @@ def print_timing(label, elapsed):
 
 def invocation_delta(after, before):
     """Compute per-phase deltas from cumulative runtime invocation counters."""
-    return {
-        key: after[key] - before[key]
-        for key in after
-    }
+    return {key: after[key] - before[key] for key in after}
 
 
 def load_seed_vocab_model():
@@ -56,9 +54,7 @@ def load_seed_vocab_model():
     seed_vocab.generate_seed_vocab(DATASETS)
 
     if not SEED_VOCAB_PATH.is_file():
-        raise FileNotFoundError(
-            f"Failed to generate {SEED_VOCAB_PATH}"
-        )
+        raise FileNotFoundError(f"Failed to generate {SEED_VOCAB_PATH}")
 
     return Word2Vec.load(str(SEED_VOCAB_PATH))
 
@@ -122,7 +118,7 @@ def build_runtime(
     """Build the model, select an OpenCL device, and compile the simulator."""
     start = perf_counter()
     model_result = nc.Model(
-        sub_lengths=[1, mp.context_length], # model architecture arguments here
+        sub_lengths=[1, mp.context_length],
         model_vocab=model_vocab,
         strict=mp.strict_vocab,
     )
@@ -157,22 +153,20 @@ def build_runtime(
 
 
 def run_demo_predictions(runtime, testing_set, max_examples, top_k):
-    """Print a small qualitative sample of next-token predictions."""
+    """Print a small qualitative sample of streaming next-token predictions."""
     print("\nSample predictions:\n")
 
     demo_count = 0
     for tokens in testing_set:
-        if len(tokens) < 2:
-            continue
-
-        for index in range(len(tokens) - 1):
-            prefix = tokens[: index + 1]
-            target = tokens[index + 1]
-            predictions = runtime.predict_next_sequence(prefix, top_k=top_k)
+        for result in iter_next_token_predictions(runtime, tokens, top_k=top_k):
             prediction_text = ", ".join(
-                f"{word} ({score:.3f})" for word, score in predictions
+                f"{word} ({score:.3f})"
+                for word, score in result["predictions"]
             )
-            print(f"{' '.join(prefix)} -> {prediction_text} | target: {target}")
+            print(
+                f"{' '.join(result['prefix'])} -> {prediction_text} "
+                f"| target: {result['target']}"
+            )
 
             demo_count += 1
             if demo_count >= max_examples:
@@ -220,10 +214,12 @@ def save_run_telemetry(
             },
             "parameters": {
                 "sub_lengths": model_result.sub_lengths,
+                "sub_lengths_mode": "legacy_deferred",
                 "context_length": mp.context_length,
                 "rep_vocab_dim": mp.rep_vocab_dim,
                 "training_restriction": mp.training_restriction,
                 "testing_restriction": mp.testing_restriction,
+                "active_context_path": "root_context_module",
             },
             "timings_seconds": timings,
             "complexity": complexity,

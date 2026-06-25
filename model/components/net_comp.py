@@ -7,9 +7,25 @@ import nengo
 import nengo_spa as spa
 import components.net_classes as ncls
 
-# helper class to store model and probes
+
 class ModelResult:
-    def __init__(self, model, context_module, strict=None, learning_connections=None, sub_lengths=None):
+    """Bundle the built model together with the probes and active modules.
+
+    The root `context_module` is the canonical model memory. Legacy
+    per-component contexts are tracked separately so we can document the old
+    architecture without keeping it on the active prediction path.
+    """
+
+    def __init__(
+        self,
+        model,
+        context_module,
+        active_component,
+        strict=None,
+        learning_connections=None,
+        sub_lengths=None,
+        legacy_context_modules=None,
+    ):
         self.model = model
         self.p_error = [t for t in model.probes if t.label == "error"][0]
         self.p_post_state = [t for t in model.probes if t.label == "post_state"][0]
@@ -17,31 +33,49 @@ class ModelResult:
         self.input_module = model.input_module
         self.target_module = model.target_module
         self.context_module = context_module
+        self.primary_context_module = context_module
+        self.active_component = active_component
+        self.active_components = [active_component]
+        self.active_context_modules = [context_module]
+        self.legacy_context_modules = legacy_context_modules or []
+        self.all_context_modules = [
+            *self.active_context_modules,
+            *self.legacy_context_modules,
+        ]
         self.strict = strict
-        model.context_module = context_module
         self.learning_connections = learning_connections or []
         self.sub_lengths = sub_lengths
 
+        model.context_module = context_module
+        model.primary_context_module = context_module
+        model.active_component = active_component
+        model.active_context_modules = self.active_context_modules
+
+
 # function that returns a model result object containing the desired model
 def Model(sub_lengths, model_vocab, strict=mp.strict_vocab):
+    """Build the model around one active root-context prediction path.
+
+    `sub_lengths` is retained for compatibility and telemetry, but the old
+    per-component context fan-out is intentionally deferred/legacy.
+    """
     with spa.Network(seed=mp.seed) as model:
         input_module = InputModule(dim=mp.rep_vocab_dim)
         target_module = InputModule(dim=mp.rep_vocab_dim)
         context_module = ncls.ContextModule(model_vocab)
-        
-        # contexts
-        # effective context lengths are approximate via len = 1/(1-alpha)
-        ctxs = [ncls.ContextModule(model_vocab, alpha=(1-1/t)) for t in sub_lengths] 
 
-        # subsystems
-        subs = [ncls.BaseComponent(
-            label=f"Component_{i}",
+        # The root context is the canonical memory and the only active context
+        # driving prediction. `sub_lengths` is kept only as a legacy/deferred
+        # configuration knob for future architectural work.
+        legacy_context_modules = []
+        active_component = ncls.BaseComponent(
+            label="RootContextComponent",
             seed=mp.seed,
-            context_in=ctxs[i],
+            context_in=context_module,
             target_in=target_module,
             model_vocab=model_vocab,
-            strict=mp.strict_vocab) 
-            for i in range(len(ctxs))]
+            strict=mp.strict_vocab,
+        )
 
         target_node = target_module.node()
 
@@ -54,12 +88,10 @@ def Model(sub_lengths, model_vocab, strict=mp.strict_vocab):
         )
         error = spa.State(model_vocab)
 
-        for i in subs:
-            i.prediction >> pre_state
-        
+        active_component.prediction >> pre_state
+
         -post_state >> error
         nengo.Connection(target_node, error.input, synapse=None)
-
 
         # learning between ensembles
         # assert len(pre_state.all_ensembles) == 1
@@ -68,10 +100,12 @@ def Model(sub_lengths, model_vocab, strict=mp.strict_vocab):
             pre_state.all_ensembles[0],
             post_state.all_ensembles[0],
             function=lambda x: np.random.random(model_vocab.dimensions),
-            learning_rule_type=nengo.PES(mp.model_lr*0.5), # Prescribed Error Sensitivity
+            learning_rule_type=nengo.PES(mp.model_lr * 0.5),  # Prescribed Error Sensitivity
         )
         nengo.Connection(error.output, learning_connection.learning_rule, transform=-1)
-        nengo.Connection(input_module.node(),context_module.token_in, synapse=None)
+
+        # Raw token input enters the root context memory directly.
+        nengo.Connection(input_module.node(), context_module.token_in, synapse=None)
 
         # Suppress learning in the final iteration to test
         is_recall_node = nengo.Node(lambda t: target_module.is_recall, size_out=1)
@@ -81,10 +115,9 @@ def Model(sub_lengths, model_vocab, strict=mp.strict_vocab):
             )
 
         # Probes to record simulation data
-        # p_target = nengo.Probe(target.output, label="target")
         p_error = nengo.Probe(error.output, label="error")
         p_post_state = nengo.Probe(post_state.output, label="post_state")
-        
+
         # prediction and probe
         prediction = post_state
         pred_probe = nengo.Probe(prediction.output, label="prediction", synapse=0.01)
@@ -92,15 +125,14 @@ def Model(sub_lengths, model_vocab, strict=mp.strict_vocab):
         model.input_module = input_module
         model.target_module = target_module
 
-    all_learning_connections = [learning_connection]
-
-    for sub in subs:
-        all_learning_connections.append(sub.learning_connection)
+    all_learning_connections = [learning_connection, active_component.learning_connection]
 
     return ModelResult(
         model,
         context_module=context_module,
+        active_component=active_component,
         strict=strict,
         learning_connections=all_learning_connections,
-        sub_lengths = sub_lengths
+        sub_lengths=sub_lengths,
+        legacy_context_modules=legacy_context_modules,
     )
