@@ -4,3 +4,4 @@ __pycache__/
 model/utils/seed_vocab.model
 model/checkpoints/
 model/results/
+model/config/runtime_profile.json

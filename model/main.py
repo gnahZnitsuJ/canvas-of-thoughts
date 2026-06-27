@@ -1,4 +1,4 @@
-import sys
+﻿import sys
 from pathlib import Path
 from time import perf_counter
 
@@ -11,10 +11,13 @@ from app.workflow import (
     build_model_vocab,
     build_runtime,
     build_train_test,
+    load_requested_runtime_profile,
     load_seed_vocab_model,
     maybe_save_run_telemetry,
     print_timing,
+    resolve_training_configuration,
     run_demo_predictions,
+    run_token_duration_calibration,
 )
 from utils.benchmark_compile import benchmark as run_compile_benchmark
 from utils.eval import evaluate_model
@@ -34,6 +37,20 @@ def main():
     workflow = resolve_workflow(args)
     timings = {}
 
+    runtime_profile = load_requested_runtime_profile(args.use_runtime_profile)
+    training_config = resolve_training_configuration(args, runtime_profile)
+
+    if args.calibrate_token_duration:
+        if training_config["training_mode"] != "scheduled":
+            raise ValueError(
+                "--calibrate-token-duration currently requires --train-mode scheduled"
+            )
+        if not workflow["train"] or not args.force_retrain:
+            raise ValueError(
+                "--calibrate-token-duration requires an actual retraining run; "
+                "use it with --train and --force-retrain"
+            )
+
     seed_vocab_model = load_seed_vocab_model()
     train_test = build_train_test(timings)
     model_vocab = build_model_vocab(seed_vocab_model, train_test.vocab, timings)
@@ -42,7 +59,24 @@ def main():
         timings,
         opencl_platform_index=args.opencl_platform_index,
         opencl_device_index=args.opencl_device_index,
+        step_time=training_config["step_time"],
     )
+    runtime.configure_training(
+        training_mode=training_config["training_mode"],
+        token_duration=training_config["token_duration"],
+        token_duration_source=training_config["token_duration_source"],
+    )
+
+    calibration_result = None
+    if args.calibrate_token_duration:
+        start = perf_counter()
+        calibration_result, _profile_path = run_token_duration_calibration(
+            runtime,
+            train_test,
+            args,
+            opencl_selection,
+        )
+        timings["Calibration"] = perf_counter() - start
 
     training_invocations_before = runtime.simulator_invocation_telemetry()
     training_invocations_after = training_invocations_before
@@ -59,10 +93,11 @@ def main():
     elif workflow["eval"] or workflow["demo"] or workflow["interactive"]:
         runtime.load_checkpoint(args.checkpoint_path)
 
+    evaluation_result = None
     evaluation_invocations_after = training_invocations_after
     if workflow["eval"]:
         start = perf_counter()
-        evaluate_model(
+        evaluation_result = evaluate_model(
             runtime,
             train_test.testing_set,
             max_examples=args.max_examples,
@@ -88,6 +123,8 @@ def main():
         training_invocations_before,
         training_invocations_after,
         evaluation_invocations_after,
+        evaluation_result=evaluation_result,
+        calibration_result=calibration_result,
     )
 
     if workflow["demo"]:

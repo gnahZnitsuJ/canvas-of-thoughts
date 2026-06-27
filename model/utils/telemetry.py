@@ -1,4 +1,4 @@
-import json
+﻿import json
 import platform
 from collections import Counter, defaultdict
 from datetime import datetime
@@ -125,13 +125,24 @@ def operator_telemetry(simulator, largest_limit=15):
     }
 
 
-def training_invocation_estimate(sequences):
+def training_invocation_estimate(sequences, training_mode="single_pass"):
     sequence_lengths = [len(tokens) for tokens in sequences if len(tokens) > 1]
     total_pairs = sum(length - 1 for length in sequence_lengths)
     reset_runs = len(sequence_lengths)
-    presentation_runs = 2 * total_pairs
+
+    if training_mode == "two_pass":
+        presentation_runs = 2 * total_pairs
+    elif training_mode == "single_pass":
+        presentation_runs = total_pairs
+    elif training_mode == "scheduled":
+        # Scheduled training still covers every token transition, but it does so
+        # with one long simulator run per sequence instead of one run per pair.
+        presentation_runs = len(sequence_lengths)
+    else:
+        raise ValueError(f"Unknown training_mode: {training_mode}")
 
     return {
+        "training_mode": training_mode,
         "total_training_pairs": total_pairs,
         "training_sequence_count": len(sequence_lengths),
         "estimated_training_reset_runs": reset_runs,
@@ -140,25 +151,63 @@ def training_invocation_estimate(sequences):
     }
 
 
-def evaluation_invocation_estimate(sequences, max_examples=50):
+def evaluation_invocation_estimate(
+    sequences,
+    max_examples=50,
+    evaluation_mode="streaming",
+):
+    if evaluation_mode == "prefix_replay":
+        prediction_count = 0
+        reset_runs = 0
+        presentation_runs = 0
+
+        for tokens in sequences:
+            for prefix_length in range(1, len(tokens)):
+                reset_runs += 1
+                presentation_runs += prefix_length
+                prediction_count += 1
+                if prediction_count >= max_examples:
+                    return {
+                        "evaluation_mode": evaluation_mode,
+                        "total_eval_predictions": prediction_count,
+                        "estimated_eval_reset_runs": reset_runs,
+                        "estimated_eval_presentation_runs": presentation_runs,
+                        "estimated_eval_sim_runs": reset_runs + presentation_runs,
+                    }
+
+        return {
+            "evaluation_mode": evaluation_mode,
+            "total_eval_predictions": prediction_count,
+            "estimated_eval_reset_runs": reset_runs,
+            "estimated_eval_presentation_runs": presentation_runs,
+            "estimated_eval_sim_runs": reset_runs + presentation_runs,
+        }
+
+    if evaluation_mode != "streaming":
+        raise ValueError(f"Unknown evaluation_mode: {evaluation_mode}")
+
     prediction_count = 0
     reset_runs = 0
     presentation_runs = 0
 
     for tokens in sequences:
-        for prefix_length in range(1, len(tokens)):
-            reset_runs += 1
-            presentation_runs += prefix_length
-            prediction_count += 1
-            if prediction_count >= max_examples:
-                return {
-                    "total_eval_predictions": prediction_count,
-                    "estimated_eval_reset_runs": reset_runs,
-                    "estimated_eval_presentation_runs": presentation_runs,
-                    "estimated_eval_sim_runs": reset_runs + presentation_runs,
-                }
+        if len(tokens) < 2:
+            continue
+
+        remaining = max_examples - prediction_count
+        sequence_predictions = min(len(tokens) - 1, remaining)
+        if sequence_predictions <= 0:
+            break
+
+        reset_runs += 1
+        presentation_runs += sequence_predictions
+        prediction_count += sequence_predictions
+
+        if prediction_count >= max_examples:
+            break
 
     return {
+        "evaluation_mode": evaluation_mode,
         "total_eval_predictions": prediction_count,
         "estimated_eval_reset_runs": reset_runs,
         "estimated_eval_presentation_runs": presentation_runs,
@@ -188,7 +237,9 @@ def _case_row(case, include_sub_lengths=True):
 
     if include_sub_lengths:
         sub_lengths = case.get("sub_lengths")
-        row.append(",".join(str(length) for length in sub_lengths) if sub_lengths else "-")
+        row.append(
+            ",".join(str(length) for length in sub_lengths) if sub_lengths else "-"
+        )
         row.append(str(case.get("context_length", "-")))
 
     row.extend(

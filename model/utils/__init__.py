@@ -7,9 +7,13 @@ __all__ = [
     "input",
     "seed_vocab",
     "benchmark_compile",
+    "calibration",
+    "runtime_profile",
 ]
 
-from . import processing
-from . import train_partition
+from . import calibration
 from . import input
+from . import processing
+from . import runtime_profile
 from . import seed_vocab
+from . import train_partition

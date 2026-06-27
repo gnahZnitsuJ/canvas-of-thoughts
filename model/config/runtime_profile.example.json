@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "training": {
+    "mode": "single_pass",
+    "scheduled_training_enabled": false,
+    "token_duration": 0.02,
+    "token_duration_source": "default",
+    "calibrated": false
+  },
+  "evaluation": {
+    "mode": "streaming",
+    "min_context_tokens": 1,
+    "stride": 1
+  },
+  "runtime": {
+    "default_step_time": 0.02
+  },
+  "opencl": {
+    "platform_index": null,
+    "device_index": null
+  }
+}

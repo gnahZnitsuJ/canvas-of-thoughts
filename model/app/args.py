@@ -8,6 +8,23 @@ BENCHMARK_MODE_MAP = {
     "compile-full": "full",
 }
 
+DEFAULT_CALIBRATION_CANDIDATES = [0.005, 0.01, 0.015, 0.02, 0.03, 0.04]
+
+
+def _parse_float_list(value):
+    """Parse a comma-separated list of floats for calibration candidates."""
+    try:
+        parsed = [float(item) for item in value.split(",") if item.strip()]
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"Invalid float list: {value}"
+        ) from exc
+
+    if not parsed:
+        raise argparse.ArgumentTypeError("At least one calibration candidate is required")
+
+    return parsed
+
 
 def parse_args():
     """Build and parse the top-level CLI for normal runs and benchmarks."""
@@ -56,6 +73,45 @@ def parse_args():
         "--force-retrain",
         action="store_true",
         help="Ignore existing checkpoint and retrain.",
+    )
+    parser.add_argument(
+        "--train-mode",
+        choices=["single-pass", "scheduled"],
+        default="single-pass",
+        help="Training driver for corpus training.",
+    )
+    parser.add_argument(
+        "--token-duration",
+        type=float,
+        help="Token duration for scheduled training or calibration.",
+    )
+    parser.add_argument(
+        "--calibrate-token-duration",
+        action="store_true",
+        help="Profile scheduled training token durations before retraining.",
+    )
+    parser.add_argument(
+        "--calibration-train-sequences",
+        type=int,
+        default=2,
+        help="Training sequences to use during token-duration calibration.",
+    )
+    parser.add_argument(
+        "--calibration-eval-examples",
+        type=int,
+        default=50,
+        help="Evaluation examples to use during token-duration calibration.",
+    )
+    parser.add_argument(
+        "--calibration-candidates",
+        type=_parse_float_list,
+        default=list(DEFAULT_CALIBRATION_CANDIDATES),
+        help="Comma-separated token durations to test during calibration.",
+    )
+    parser.add_argument(
+        "--use-runtime-profile",
+        action="store_true",
+        help="Load token-duration defaults from model/config/runtime_profile.json.",
     )
     parser.add_argument(
         "--max-examples",

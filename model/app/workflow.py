@@ -1,5 +1,6 @@
-"""High-level workflow helpers used by the main model CLI entrypoint."""
+﻿"""High-level workflow helpers used by the main model CLI entrypoint."""
 
+from datetime import datetime
 from pathlib import Path
 from time import perf_counter
 
@@ -10,13 +11,19 @@ from gensim.models import Word2Vec
 from nltk.corpus import reuters
 
 import components.net_comp as nc
-from components.runtime import ModelRuntime
+from components.runtime import ModelRuntime, TRAINING_SEMANTICS_VERSION
 from config import model_parameters as mp
 from utils import seed_vocab
+from utils.calibration import calibrate_token_duration
 from utils.eval import iter_next_token_predictions
 from utils.input import make_unitary
 from utils.opencl import print_opencl_selection, select_opencl_device
 from utils.processing import WordsToSPAVocab
+from utils.runtime_profile import (
+    default_runtime_profile,
+    load_runtime_profile,
+    save_runtime_profile,
+)
 from utils.telemetry import (
     environment_telemetry,
     evaluation_invocation_estimate,
@@ -31,6 +38,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 RESULTS_DIR = BASE_DIR / "results"
 SEED_VOCAB_PATH = BASE_DIR / "utils" / "seed_vocab.model"
 DATASETS = [reuters]
+DEFAULT_STEP_TIME = 0.02
 
 
 def print_timing(label, elapsed):
@@ -109,11 +117,52 @@ def build_model_vocab(seed_vocab_model, vocab, timings):
     return model_vocab
 
 
+def load_requested_runtime_profile(use_runtime_profile):
+    """Load the optional local runtime profile when requested by the user."""
+    if not use_runtime_profile:
+        return None
+
+    profile = load_runtime_profile(BASE_DIR)
+    if profile is None:
+        print("\nRuntime profile requested, but model/config/runtime_profile.json was not found.")
+        return None
+
+    print("\nLoaded runtime profile from model/config/runtime_profile.json")
+    return profile
+
+
+def resolve_training_configuration(args, runtime_profile=None):
+    """Resolve training mode and token-duration defaults from CLI/profile."""
+    profile_training = runtime_profile.get("training", {}) if runtime_profile else {}
+    profile_runtime = runtime_profile.get("runtime", {}) if runtime_profile else {}
+
+    step_time = float(profile_runtime.get("default_step_time", DEFAULT_STEP_TIME))
+    training_mode = args.train_mode.replace("-", "_")
+
+    if args.token_duration is not None:
+        token_duration = float(args.token_duration)
+        token_duration_source = "cli"
+    elif runtime_profile is not None and profile_training.get("token_duration") is not None:
+        token_duration = float(profile_training["token_duration"])
+        token_duration_source = profile_training.get("token_duration_source", "profile")
+    else:
+        token_duration = step_time
+        token_duration_source = "default"
+
+    return {
+        "training_mode": training_mode,
+        "token_duration": token_duration,
+        "token_duration_source": token_duration_source,
+        "step_time": step_time,
+    }
+
+
 def build_runtime(
     model_vocab,
     timings,
     opencl_platform_index=None,
     opencl_device_index=None,
+    step_time=DEFAULT_STEP_TIME,
 ):
     """Build the model, select an OpenCL device, and compile the simulator."""
     start = perf_counter()
@@ -124,8 +173,6 @@ def build_runtime(
     )
     timings["Model build"] = perf_counter() - start
 
-    # Device selection is shared with benchmarks so normal runs and profiling
-    # runs use the same indexing rules and environment-variable fallbacks.
     opencl_selection = select_opencl_device(
         platform_index=opencl_platform_index,
         device_index=opencl_device_index,
@@ -147,7 +194,7 @@ def build_runtime(
         model_result,
         sim,
         model_vocab,
-        step_time=0.02,
+        step_time=step_time,
     )
     return runtime, model_result, platform, device, opencl_selection
 
@@ -173,6 +220,63 @@ def run_demo_predictions(runtime, testing_set, max_examples, top_k):
                 return
 
 
+def save_calibrated_runtime_profile(calibration_result, runtime, opencl_selection):
+    """Persist a machine-local runtime profile from the latest calibration."""
+    profile = default_runtime_profile()
+    profile["training"].update(
+        {
+            "mode": "scheduled",
+            "scheduled_training_enabled": True,
+            "token_duration": calibration_result["selected_token_duration"],
+            "token_duration_source": "calibrated",
+            "calibrated": True,
+            "training_semantics_version": TRAINING_SEMANTICS_VERSION,
+            "calibration": {
+                "timestamp": datetime.now().astimezone().isoformat(),
+                **calibration_result,
+            },
+        }
+    )
+    profile["runtime"]["default_step_time"] = runtime.step_time
+    profile["opencl"] = {
+        "platform_index": opencl_selection["platform_index"],
+        "device_index": opencl_selection["device_index"],
+    }
+
+    return save_runtime_profile(BASE_DIR, profile)
+
+
+def run_token_duration_calibration(runtime, train_test, args, opencl_selection):
+    """Calibrate the scheduled-training token duration and save the profile."""
+    calibration_result = calibrate_token_duration(
+        runtime,
+        train_test.training_set,
+        train_test.testing_set,
+        candidates=args.calibration_candidates,
+        baseline_duration=runtime.step_time,
+        calibration_train_sequences=args.calibration_train_sequences,
+        calibration_eval_examples=args.calibration_eval_examples,
+        top_k=args.top_k,
+    )
+    runtime.configure_training(
+        training_mode="scheduled",
+        token_duration=calibration_result["selected_token_duration"],
+        token_duration_source="calibrated",
+    )
+    profile_path = save_calibrated_runtime_profile(
+        calibration_result,
+        runtime,
+        opencl_selection,
+    )
+
+    print(
+        "\nCalibration selected token duration: "
+        f"{calibration_result['selected_token_duration']:.3f} sec"
+    )
+    print(f"Saved runtime profile to: {profile_path}")
+    return calibration_result, profile_path
+
+
 def save_run_telemetry(
     runtime,
     model_result,
@@ -185,6 +289,8 @@ def save_run_telemetry(
     training_invocations_before,
     training_invocations_after,
     evaluation_invocations_after,
+    evaluation_result=None,
+    calibration_result=None,
 ):
     """Persist the telemetry payload for a normal workflow run."""
     complexity = {
@@ -192,51 +298,58 @@ def save_run_telemetry(
         "operators": operator_telemetry(runtime.sim),
     }
     invocation_estimates = {
-        "training": training_invocation_estimate(train_test.training_set),
+        "training": training_invocation_estimate(
+            train_test.training_set,
+            training_mode=runtime.training_mode,
+        ),
         "evaluation": evaluation_invocation_estimate(
             train_test.testing_set,
             max_examples=max_examples,
+            evaluation_mode="streaming",
         ),
     }
 
-    # Store enough context to compare runs later without reopening the code:
-    # environment, model shape, timings, and both estimated and actual sim use.
-    telemetry_path = save_telemetry(
-        RESULTS_DIR,
-        {
-            "kind": "model_run",
-            "environment": {
-                **environment_telemetry(),
-                "opencl_platform": platform.name,
-                "opencl_device": device.name,
-                "opencl_platform_index": opencl_selection["platform_index"],
-                "opencl_device_index": opencl_selection["device_index"],
-            },
-            "parameters": {
-                "sub_lengths": model_result.sub_lengths,
-                "sub_lengths_mode": "legacy_deferred",
-                "context_length": mp.context_length,
-                "rep_vocab_dim": mp.rep_vocab_dim,
-                "training_restriction": mp.training_restriction,
-                "testing_restriction": mp.testing_restriction,
-                "active_context_path": "root_context_module",
-            },
-            "timings_seconds": timings,
-            "complexity": complexity,
-            "invocation_estimates": invocation_estimates,
-            "actual_simulator_invocations": {
-                "training": invocation_delta(
-                    training_invocations_after,
-                    training_invocations_before,
-                ),
-                "evaluation": invocation_delta(
-                    evaluation_invocations_after,
-                    training_invocations_after,
-                ),
-                "total": evaluation_invocations_after,
-            },
+    payload = {
+        "kind": "model_run",
+        "environment": {
+            **environment_telemetry(),
+            "opencl_platform": platform.name,
+            "opencl_device": device.name,
+            "opencl_platform_index": opencl_selection["platform_index"],
+            "opencl_device_index": opencl_selection["device_index"],
         },
-    )
+        "parameters": {
+            "sub_lengths": model_result.sub_lengths,
+            "sub_lengths_mode": "legacy_deferred",
+            "context_length": mp.context_length,
+            "rep_vocab_dim": mp.rep_vocab_dim,
+            "training_restriction": mp.training_restriction,
+            "testing_restriction": mp.testing_restriction,
+            "active_context_path": "root_context_module",
+            "evaluation_mode": "streaming",
+            **runtime.training_configuration(),
+        },
+        "timings_seconds": timings,
+        "complexity": complexity,
+        "invocation_estimates": invocation_estimates,
+        "actual_simulator_invocations": {
+            "training": invocation_delta(
+                training_invocations_after,
+                training_invocations_before,
+            ),
+            "evaluation": invocation_delta(
+                evaluation_invocations_after,
+                training_invocations_after,
+            ),
+            "total": evaluation_invocations_after,
+        },
+    }
+    if evaluation_result is not None:
+        payload["evaluation"] = evaluation_result
+    if calibration_result is not None:
+        payload["calibration"] = calibration_result
+
+    telemetry_path = save_telemetry(RESULTS_DIR, payload)
     print(f"\nSaved run telemetry to: {telemetry_path}")
 
 
@@ -253,6 +366,8 @@ def maybe_save_run_telemetry(
     training_invocations_before,
     training_invocations_after,
     evaluation_invocations_after,
+    evaluation_result=None,
+    calibration_result=None,
 ):
     """Honor the telemetry toggle while keeping the call site in main.py simple."""
     if not telemetry_enabled:
@@ -271,4 +386,6 @@ def maybe_save_run_telemetry(
         training_invocations_before,
         training_invocations_after,
         evaluation_invocations_after,
+        evaluation_result=evaluation_result,
+        calibration_result=calibration_result,
     )
