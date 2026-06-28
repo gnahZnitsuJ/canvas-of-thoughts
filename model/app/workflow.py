@@ -270,8 +270,9 @@ def run_token_duration_calibration(runtime, train_test, args, opencl_selection):
     )
 
     print(
-        "\nCalibration selected token duration: "
-        f"{calibration_result['selected_token_duration']:.3f} sec"
+        "\nReference-equivalence calibration selected token duration: "
+        f"{calibration_result['selected_token_duration']:.3f} sec "
+        f"(k={calibration_result['selected_k']}, dt={calibration_result['simulator_dt']:.6f})"
     )
     print(f"Saved runtime profile to: {profile_path}")
     return calibration_result, profile_path
@@ -389,3 +390,4 @@ def maybe_save_run_telemetry(
         evaluation_result=evaluation_result,
         calibration_result=calibration_result,
     )
+

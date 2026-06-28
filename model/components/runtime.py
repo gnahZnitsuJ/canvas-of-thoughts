@@ -1,4 +1,4 @@
-import os
+﻿import os
 import pickle
 from datetime import datetime
 from time import perf_counter
@@ -105,10 +105,28 @@ class ModelRuntime:
             "simulated_seconds": self.simulated_seconds,
         }
 
+    def _weight_signal_for_connection(self, conn):
+        """Return the simulator signal that owns the live learned weights."""
+        model_signals = getattr(self.sim, "model", None)
+        model_signals = getattr(model_signals, "sig", None)
+        if model_signals is None or conn not in model_signals:
+            return None
+        return model_signals[conn].get("weights")
+
+    def _current_connection_weights(self, conn):
+        """Read the live connection weights across simulator backends."""
+        weight_signal = self._weight_signal_for_connection(conn)
+        if weight_signal is not None and hasattr(self.sim, "signals"):
+            signal_weights = self.sim.signals.get(weight_signal)
+            if signal_weights is not None:
+                return np.array(signal_weights, copy=True)
+
+        return np.array(self.sim.data[conn].weights, copy=True)
+
     def snapshot_learning_weights(self):
         """Capture the current learned weights for calibration or experimentation."""
         return [
-            self.sim.data[conn].weights.copy()
+            self._current_connection_weights(conn)
             for conn in self.model_result.learning_connections
         ]
 
@@ -426,7 +444,7 @@ class ModelRuntime:
             "training_semantics_version": TRAINING_SEMANTICS_VERSION,
             "num_learning_connections": len(self.model_result.learning_connections),
             "learning_shapes": [
-                tuple(self.sim.data[conn].weights.shape)
+                tuple(self._current_connection_weights(conn).shape)
                 for conn in self.model_result.learning_connections
             ],
             "sub_lengths": self.model_result.sub_lengths,
@@ -443,8 +461,7 @@ class ModelRuntime:
         }
 
         for conn in self.model_result.learning_connections:
-            weights = self.sim.data[conn].weights.copy()
-            checkpoint["weights"].append(weights)
+            checkpoint["weights"].append(self._current_connection_weights(conn))
 
         full_path = self._resolve_checkpoint_path(path)
 
@@ -455,7 +472,8 @@ class ModelRuntime:
 
     # loading model
     def _restore_connection_weights(self, conn, weights):
-        current_weights = self.sim.data[conn].weights
+        """Write learned weights back to the live simulator state."""
+        current_weights = self._current_connection_weights(conn)
 
         if current_weights.shape != weights.shape:
             raise ValueError(
@@ -464,15 +482,20 @@ class ModelRuntime:
                 f"found {weights.shape}"
             )
 
-        try:
-            current_weights[:] = weights
-            return
-        except ValueError as exc:
-            if "read-only" not in str(exc):
-                raise
+        weight_signal = self._weight_signal_for_connection(conn)
+        if weight_signal is not None and hasattr(self.sim, "signals"):
+            signal_weights = self.sim.signals.get(weight_signal)
+            if signal_weights is not None:
+                try:
+                    signal_weights[...] = weights
+                except (TypeError, ValueError):
+                    self.sim.signals[weight_signal] = np.array(weights, copy=True)
 
-        weight_signal = self.sim.model.sig[conn]["weights"]
-        self.sim.signals[weight_signal] = weights
+        # Keep the backend-independent data view in sync when it is writable.
+        try:
+            self.sim.data[conn].weights[...] = weights
+        except (TypeError, ValueError):
+            pass
 
     def load_checkpoint(self, path="checkpoint.pkl"):
         full_path = self._resolve_checkpoint_path(path)
@@ -534,3 +557,4 @@ class ModelRuntime:
             self.train_corpus(sequences)
 
         self.save_checkpoint(checkpoint_path)
+

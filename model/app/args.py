@@ -1,4 +1,4 @@
-"""CLI argument parsing and workflow-mode resolution for model/main.py."""
+﻿"""CLI argument parsing and workflow-mode resolution for model/main.py."""
 
 import argparse
 
@@ -8,20 +8,22 @@ BENCHMARK_MODE_MAP = {
     "compile-full": "full",
 }
 
-DEFAULT_CALIBRATION_CANDIDATES = [0.005, 0.01, 0.015, 0.02, 0.03, 0.04]
+DEFAULT_CALIBRATION_CANDIDATES = None
 
 
-def _parse_float_list(value):
-    """Parse a comma-separated list of floats for calibration candidates."""
+def _parse_int_list(value):
+    """Parse a comma-separated list of integer timestep multipliers."""
     try:
-        parsed = [float(item) for item in value.split(",") if item.strip()]
+        parsed = [int(item) for item in value.split(",") if item.strip()]
     except ValueError as exc:
         raise argparse.ArgumentTypeError(
-            f"Invalid float list: {value}"
+            f"Invalid integer list: {value}"
         ) from exc
 
     if not parsed:
         raise argparse.ArgumentTypeError("At least one calibration candidate is required")
+    if any(item < 1 for item in parsed):
+        raise argparse.ArgumentTypeError("Calibration candidates must be positive integers")
 
     return parsed
 
@@ -83,12 +85,12 @@ def parse_args():
     parser.add_argument(
         "--token-duration",
         type=float,
-        help="Token duration for scheduled training or calibration.",
+        help="Token duration for scheduled training.",
     )
     parser.add_argument(
         "--calibrate-token-duration",
         action="store_true",
-        help="Profile scheduled training token durations before retraining.",
+        help="Match scheduled training against the single-pass reference before retraining.",
     )
     parser.add_argument(
         "--calibration-train-sequences",
@@ -104,9 +106,12 @@ def parse_args():
     )
     parser.add_argument(
         "--calibration-candidates",
-        type=_parse_float_list,
-        default=list(DEFAULT_CALIBRATION_CANDIDATES),
-        help="Comma-separated token durations to test during calibration.",
+        type=_parse_int_list,
+        default=DEFAULT_CALIBRATION_CANDIDATES,
+        help=(
+            "Comma-separated integer timestep multipliers k to test during "
+            "calibration. Defaults to testing every k from 1 through baseline_k."
+        ),
     )
     parser.add_argument(
         "--use-runtime-profile",
