@@ -259,6 +259,44 @@ def make_compile_profile(
     }
 
 
+def make_compile_fingerprint(model_result, compile_profile, opencl_selection):
+    """Record the configuration that produced a compile result.
+
+    This scaffolding is broader than checkpoint compatibility. It captures both
+    architectural context and workflow/profile knobs so future comparisons do
+    not accidentally mix unlike runs.
+    """
+    return {
+        "backend": compile_profile["backend"],
+        "opencl_platform": compile_profile["opencl_platform"],
+        "opencl_device": compile_profile["opencl_device"],
+        "opencl_platform_index": opencl_selection["platform_index"],
+        "opencl_device_index": opencl_selection["device_index"],
+        "rep_vocab_dim": mp.rep_vocab_dim,
+        "context_length": mp.context_length,
+        "strict_vocab": mp.strict_vocab,
+        "sub_lengths": model_result.sub_lengths,
+        "sub_lengths_mode": "legacy_deferred",
+        "training_semantics_version": TRAINING_SEMANTICS_VERSION,
+        # Probe modes and learned-init modes are not configurable yet, but we
+        # record the current baseline explicitly so future runs can compare
+        # against it cleanly once those knobs become real CLI options.
+        "probe_mode": "debug",
+        "learned_init_mode": "random-function",
+        "learned_init_seed": None,
+        "compile_profile": {
+            "name": "full",
+            "first_run_warmup_enabled": compile_profile[
+                "first_run_warmup_enabled"
+            ],
+            "profile_compile_enabled": compile_profile[
+                "profile_compile_enabled"
+            ],
+        },
+        "environment": dict(compile_profile["environment"]),
+    }
+
+
 def build_runtime(
     model_vocab,
     timings,
@@ -313,7 +351,21 @@ def build_runtime(
         platform=platform,
         device=device,
     )
-    return runtime, model_result, platform, device, opencl_selection, compile_profile
+    compile_fingerprint = make_compile_fingerprint(
+        model_result,
+        compile_profile,
+        opencl_selection,
+    )
+    runtime.set_compile_fingerprint(compile_fingerprint)
+    return (
+        runtime,
+        model_result,
+        platform,
+        device,
+        opencl_selection,
+        compile_profile,
+        compile_fingerprint,
+    )
 
 
 def run_demo_predictions(runtime, testing_set, max_examples, top_k):
@@ -408,6 +460,7 @@ def save_run_telemetry(
     training_invocations_after,
     evaluation_invocations_after,
     compile_profile,
+    compile_fingerprint,
     evaluation_result=None,
     calibration_result=None,
 ):
@@ -450,6 +503,7 @@ def save_run_telemetry(
         },
         "timings_seconds": timings,
         "compile_profile": compile_profile,
+        "compile_fingerprint": compile_fingerprint,
         "complexity": complexity,
         "invocation_estimates": invocation_estimates,
         "actual_simulator_invocations": {
@@ -487,6 +541,7 @@ def maybe_save_run_telemetry(
     training_invocations_after,
     evaluation_invocations_after,
     compile_profile,
+    compile_fingerprint,
     evaluation_result=None,
     calibration_result=None,
 ):
@@ -508,6 +563,8 @@ def maybe_save_run_telemetry(
         training_invocations_after,
         evaluation_invocations_after,
         compile_profile,
+        compile_fingerprint,
         evaluation_result=evaluation_result,
         calibration_result=calibration_result,
     )
+

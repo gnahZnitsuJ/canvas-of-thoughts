@@ -1,4 +1,4 @@
-﻿import os
+import os
 import pickle
 from datetime import datetime
 from time import perf_counter
@@ -21,6 +21,7 @@ class ModelRuntime:
         self.sim = sim
         self.model_vocab = model_vocab
         self.step_time = float(step_time)
+        self.compile_fingerprint = None
 
         # Cache normalized vocabulary vectors so prediction decoding stays cheap.
         self.vocab_keys = list(model_vocab.keys())
@@ -95,6 +96,10 @@ class ModelRuntime:
             "token_duration": self.token_duration,
             "token_duration_source": self.token_duration_source,
         }
+
+    def set_compile_fingerprint(self, compile_fingerprint):
+        """Attach compile-context metadata for telemetry and checkpoints."""
+        self.compile_fingerprint = compile_fingerprint
 
     def simulator_invocation_telemetry(self):
         return {
@@ -456,6 +461,7 @@ class ModelRuntime:
             "metadata": {
                 "timestamp": datetime.now().isoformat(),
                 "architecture": self._architecture_signature(),
+                "compile_fingerprint": self.compile_fingerprint,
             },
             "weights": [],
         }
@@ -557,4 +563,3 @@ class ModelRuntime:
             self.train_corpus(sequences)
 
         self.save_checkpoint(checkpoint_path)
-

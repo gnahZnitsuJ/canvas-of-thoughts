@@ -1,4 +1,4 @@
-﻿import sys
+import sys
 from pathlib import Path
 from time import perf_counter
 
@@ -61,6 +61,7 @@ def main():
         device,
         opencl_selection,
         compile_profile,
+        compile_fingerprint,
     ) = build_runtime(
         model_vocab,
         timings,
@@ -133,6 +134,7 @@ def main():
         training_invocations_after,
         evaluation_invocations_after,
         compile_profile,
+        compile_fingerprint,
         evaluation_result=evaluation_result,
         calibration_result=calibration_result,
     )
