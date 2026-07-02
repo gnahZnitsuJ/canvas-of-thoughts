@@ -1,5 +1,7 @@
 ﻿"""High-level workflow helpers used by the main model CLI entrypoint."""
 
+import cProfile
+import os
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
@@ -39,6 +41,14 @@ RESULTS_DIR = BASE_DIR / "results"
 SEED_VOCAB_PATH = BASE_DIR / "utils" / "seed_vocab.model"
 DATASETS = [reuters]
 DEFAULT_STEP_TIME = 0.02
+COMPILE_PROFILE_ENV_VARS = (
+    "PYOPENCL_NO_CACHE",
+    "PYOPENCL_COMPILER_OUTPUT",
+    "PYOPENCL_BUILD_OPTIONS",
+    "PYOPENCL_CTX",
+    "CANVAS_OPENCL_PLATFORM_INDEX",
+    "CANVAS_OPENCL_DEVICE_INDEX",
+)
 
 
 def print_timing(label, elapsed):
@@ -157,12 +167,106 @@ def resolve_training_configuration(args, runtime_profile=None):
     }
 
 
+def compile_profile_artifact_path():
+    """Local path for an optional simulator-construction cProfile artifact."""
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().astimezone().strftime("%Y%m%d_%H%M%S_%f")
+    return RESULTS_DIR / f"compile_profile_{timestamp}.prof"
+
+
+def compile_profile_environment():
+    """Capture environment fields that often affect OpenCL build behavior."""
+    return {
+        name: os.getenv(name)
+        for name in COMPILE_PROFILE_ENV_VARS
+    }
+
+
+def construct_simulator(model, context, profile_compile=False):
+    """Construct the simulator, optionally wrapping the build in cProfile."""
+    profile_output_path = None
+
+    if profile_compile:
+        profiler = cProfile.Profile()
+        start = perf_counter()
+        profiler.enable()
+        try:
+            simulator = nengo_ocl.Simulator(
+                model,
+                context=context,
+                progress_bar=False,
+            )
+        finally:
+            profiler.disable()
+        simulator_construct_seconds = perf_counter() - start
+        profile_output_path = compile_profile_artifact_path()
+        profiler.dump_stats(str(profile_output_path))
+        return simulator, simulator_construct_seconds, profile_output_path
+
+    start = perf_counter()
+    simulator = nengo_ocl.Simulator(
+        model,
+        context=context,
+        progress_bar=False,
+    )
+    simulator_construct_seconds = perf_counter() - start
+    return simulator, simulator_construct_seconds, profile_output_path
+
+
+def run_first_run_warmup(simulator, step_time):
+    """Separate first-step backend startup from constructor timing.
+
+    We run one simulator step so kernel startup and lazy backend work can be
+    measured explicitly, then reset back to the initial state before normal use.
+    """
+    run_steps = getattr(simulator, "run_steps", None)
+    if callable(run_steps):
+        run_steps(1)
+    else:
+        warmup_dt = float(getattr(simulator, "dt", step_time))
+        simulator.run(warmup_dt)
+
+    reset_method = getattr(simulator, "reset", None)
+    if callable(reset_method):
+        reset_method()
+
+
+def make_compile_profile(
+    backend,
+    timings,
+    first_run_warmup_enabled,
+    profile_compile_enabled,
+    profile_output_path,
+    platform,
+    device,
+):
+    """Assemble the compile-phase telemetry block for normal workflow runs."""
+    return {
+        "backend": backend,
+        "model_build_seconds": timings.get("Model build"),
+        "simulator_construct_seconds": timings.get("Simulator compile"),
+        "first_run_warmup_seconds": timings.get("First-run warmup"),
+        "first_run_warmup_enabled": first_run_warmup_enabled,
+        "profile_compile_enabled": profile_compile_enabled,
+        "profile_output_path": (
+            str(profile_output_path)
+            if profile_output_path is not None
+            else None
+        ),
+        "opencl_platform": platform.name,
+        "opencl_device": device.name,
+        "environment": compile_profile_environment(),
+    }
+
+
 def build_runtime(
     model_vocab,
     timings,
     opencl_platform_index=None,
     opencl_device_index=None,
     step_time=DEFAULT_STEP_TIME,
+    first_run_warmup=False,
+    profile_compile=False,
 ):
     """Build the model, select an OpenCL device, and compile the simulator."""
     start = perf_counter()
@@ -182,13 +286,17 @@ def build_runtime(
     device = opencl_selection["device"]
     context = opencl_selection["context"]
 
-    start = perf_counter()
-    sim = nengo_ocl.Simulator(
+    sim, simulator_construct_seconds, profile_output_path = construct_simulator(
         model_result.model,
-        context=context,
-        progress_bar=False,
+        context,
+        profile_compile=profile_compile,
     )
-    timings["Simulator compile"] = perf_counter() - start
+    timings["Simulator compile"] = simulator_construct_seconds
+
+    if first_run_warmup:
+        warmup_start = perf_counter()
+        run_first_run_warmup(sim, step_time)
+        timings["First-run warmup"] = perf_counter() - warmup_start
 
     runtime = ModelRuntime(
         model_result,
@@ -196,7 +304,16 @@ def build_runtime(
         model_vocab,
         step_time=step_time,
     )
-    return runtime, model_result, platform, device, opencl_selection
+    compile_profile = make_compile_profile(
+        backend="nengo_ocl",
+        timings=timings,
+        first_run_warmup_enabled=first_run_warmup,
+        profile_compile_enabled=profile_compile,
+        profile_output_path=profile_output_path,
+        platform=platform,
+        device=device,
+    )
+    return runtime, model_result, platform, device, opencl_selection, compile_profile
 
 
 def run_demo_predictions(runtime, testing_set, max_examples, top_k):
@@ -290,6 +407,7 @@ def save_run_telemetry(
     training_invocations_before,
     training_invocations_after,
     evaluation_invocations_after,
+    compile_profile,
     evaluation_result=None,
     calibration_result=None,
 ):
@@ -331,6 +449,7 @@ def save_run_telemetry(
             **runtime.training_configuration(),
         },
         "timings_seconds": timings,
+        "compile_profile": compile_profile,
         "complexity": complexity,
         "invocation_estimates": invocation_estimates,
         "actual_simulator_invocations": {
@@ -367,6 +486,7 @@ def maybe_save_run_telemetry(
     training_invocations_before,
     training_invocations_after,
     evaluation_invocations_after,
+    compile_profile,
     evaluation_result=None,
     calibration_result=None,
 ):
@@ -387,7 +507,7 @@ def maybe_save_run_telemetry(
         training_invocations_before,
         training_invocations_after,
         evaluation_invocations_after,
+        compile_profile,
         evaluation_result=evaluation_result,
         calibration_result=calibration_result,
     )
-

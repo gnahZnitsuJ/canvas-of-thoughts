@@ -54,12 +54,21 @@ def main():
     seed_vocab_model = load_seed_vocab_model()
     train_test = build_train_test(timings)
     model_vocab = build_model_vocab(seed_vocab_model, train_test.vocab, timings)
-    runtime, model_result, platform, device, opencl_selection = build_runtime(
+    (
+        runtime,
+        model_result,
+        platform,
+        device,
+        opencl_selection,
+        compile_profile,
+    ) = build_runtime(
         model_vocab,
         timings,
         opencl_platform_index=args.opencl_platform_index,
         opencl_device_index=args.opencl_device_index,
         step_time=training_config["step_time"],
+        first_run_warmup=args.first_run_warmup,
+        profile_compile=args.profile_compile,
     )
     runtime.configure_training(
         training_mode=training_config["training_mode"],
@@ -123,6 +132,7 @@ def main():
         training_invocations_before,
         training_invocations_after,
         evaluation_invocations_after,
+        compile_profile,
         evaluation_result=evaluation_result,
         calibration_result=calibration_result,
     )

@@ -119,6 +119,16 @@ def parse_args():
         help="Load token-duration defaults from model/config/runtime_profile.json.",
     )
     parser.add_argument(
+        "--first-run-warmup",
+        action="store_true",
+        help="Run one post-construction warmup step and record its startup cost.",
+    )
+    parser.add_argument(
+        "--profile-compile",
+        action="store_true",
+        help="Write a cProfile .prof artifact for simulator construction under model/results/.",
+    )
+    parser.add_argument(
         "--max-examples",
         type=int,
         default=50,
