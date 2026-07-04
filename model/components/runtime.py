@@ -346,82 +346,14 @@ class ModelRuntime:
 
         return generated
 
-    # realtime console interface
-    def interactive_loop(
-        self,
-        top_k=5,
-        generate=False,
-        max_tokens=20,
-    ):
-        print("\nRealtime interactive mode")
-        print("Type '/exit' to quit")
-        print("Type '/reset' to clear context")
-        print("Type '/help' to show commands\n")
-
-        self.reset_context()
-
-        while True:
-            try:
-                text = input(">>> ").strip()
-
-                if text.startswith("/"):
-                    command = text.lower()
-
-                    if command in ["/exit", "/quit"]:
-                        break
-
-                    elif command == "/reset":
-                        self.reset_context()
-                        print("[context reset]")
-
-                    elif command == "/help":
-                        print("\nCommands:")
-                        print("/reset  - clear context memory")
-                        print("/exit   - quit interactive mode")
-                        print("/help   - show commands")
-
-                    else:
-                        print(f"Unknown command: {command}")
-
-                    continue
-
-                if len(text) == 0:
-                    continue
-
-                if generate:
-                    output = self.generate(
-                        text,
-                        max_tokens=max_tokens,
-                        top_k=top_k,
-                        reset_context=False,
-                        verbose=False,
-                    )
-
-                    print("generated:")
-                    print(" ".join(output))
-
-                else:
-                    predictions = self.interactive_predict(
-                        text,
-                        top_k=top_k,
-                        reset_context=False,
-                    )
-
-                    if len(predictions) == 0:
-                        print("No prediction.")
-                        continue
-
-                    prediction_text = ", ".join(
-                        f"{word} ({score:.3f})"
-                        for word, score in predictions
-                    )
-
-                    print(prediction_text)
-
-            except KeyboardInterrupt:
-                break
-
-        print("\nExiting interactive mode.")
+    def runtime_status_snapshot(self):
+        """Collect stable runtime state for the developer shell and telemetry views."""
+        return {
+            "step_time": self.step_time,
+            "training": self.training_configuration(),
+            "invocations": self.simulator_invocation_telemetry(),
+            "compile_fingerprint": self.compile_fingerprint,
+        }
 
     # reset context
     def reset_context(self):

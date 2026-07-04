@@ -7,6 +7,7 @@ if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
 from app.args import BENCHMARK_MODE_MAP, parse_args, resolve_workflow
+from app.shell import launch_interactive_prompt, launch_runtime_shell
 from app.workflow import (
     build_model_vocab,
     build_runtime,
@@ -100,7 +101,7 @@ def main():
         )
         timings["Training"] = perf_counter() - start
         training_invocations_after = runtime.simulator_invocation_telemetry()
-    elif workflow["eval"] or workflow["demo"] or workflow["interactive"]:
+    elif workflow["eval"] or workflow["demo"] or workflow["interactive"] or workflow["shell"]:
         runtime.load_checkpoint(args.checkpoint_path)
 
     evaluation_result = None
@@ -148,10 +149,22 @@ def main():
         )
 
     if workflow["interactive"]:
-        runtime.interactive_loop(
+        launch_interactive_prompt(
+            runtime,
             top_k=args.top_k,
             generate=args.generate,
             max_tokens=args.max_tokens,
+        )
+
+    if workflow["shell"]:
+        launch_runtime_shell(
+            runtime,
+            train_test.testing_set,
+            args.checkpoint_path,
+            top_k=args.top_k,
+            max_tokens=args.max_tokens,
+            max_examples=args.max_examples,
+            max_demo_examples=args.max_demo_examples,
         )
 
 

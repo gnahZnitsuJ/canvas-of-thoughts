@@ -1,0 +1,2 @@
+# Keep Markdown docs on LF so Windows tooling does not create noisy diff churn.
+*.md text eol=lf

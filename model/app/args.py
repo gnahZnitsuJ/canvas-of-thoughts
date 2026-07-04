@@ -52,6 +52,11 @@ def parse_args():
         help="Launch the interactive prompt.",
     )
     parser.add_argument(
+        "--shell",
+        action="store_true",
+        help="Launch the developer runtime shell.",
+    )
+    parser.add_argument(
         "--no-eval",
         action="store_true",
         help="Skip evaluation in the default workflow.",
@@ -178,7 +183,18 @@ def parse_args():
             "Defaults to CANVAS_OPENCL_DEVICE_INDEX if set, otherwise 0."
         ),
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+
+    if args.shell and args.interactive:
+        parser.error("--shell cannot be combined with --interactive.")
+
+    if args.shell and args.full and not args.no_interactive:
+        parser.error(
+            "--full includes --interactive. Use --full --no-interactive --shell "
+            "if you want the full workflow before the developer shell."
+        )
+
+    return args
 
 
 def resolve_workflow(args):
@@ -190,6 +206,7 @@ def resolve_workflow(args):
             args.eval,
             args.demo,
             args.interactive,
+            args.shell,
         ]
     )
 
@@ -200,6 +217,7 @@ def resolve_workflow(args):
                 "eval": True,
                 "demo": True,
                 "interactive": True,
+                "shell": args.shell,
             }
         else:
             workflow = {
@@ -207,6 +225,7 @@ def resolve_workflow(args):
                 "eval": args.eval,
                 "demo": args.demo,
                 "interactive": args.interactive,
+                "shell": args.shell,
             }
     else:
         workflow = {
@@ -214,6 +233,7 @@ def resolve_workflow(args):
             "eval": False,
             "demo": False,
             "interactive": False,
+            "shell": False,
         }
 
     if explicit_workflow:

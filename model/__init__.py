@@ -1,9 +1,3 @@
-# This file marks the 'model' directory as a Python package.
+"""Top-level package marker for the model source tree."""
 
-__all__ = ["app", "components", "utils", "config", "main"]
-
-import app
-import components
-import utils
-import config
-import main
+__all__ = ["app", "components", "config", "main", "utils"]

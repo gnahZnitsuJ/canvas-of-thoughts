@@ -35,6 +35,7 @@ python model/main.py --train --no-eval --no-demo --no-interactive
 python model/main.py --eval --max-examples 50
 python model/main.py --demo --max-demo-examples 10 --top-k 3
 python model/main.py --interactive --generate --top-k 5 --max-tokens 15
+python model/main.py --shell --top-k 5 --max-tokens 15
 python model/main.py --train --no-eval --opencl-platform-index 0 --opencl-device-index 0
 ```
 
@@ -53,6 +54,10 @@ python model/main.py --train --no-eval --opencl-platform-index 0 --opencl-device
   loads the checkpoint and opens the realtime prompt. With `--generate`, the model
   continues autoregressively after your prompt, showing up to `5` candidates per
   step and stopping after `15` generated tokens unless you end earlier.
+- `python model/main.py --shell --top-k 5 --max-tokens 15`
+  loads the checkpoint and opens a persistent developer shell on top of the
+  already-compiled runtime. That shell can run status, reset, predict, generate,
+  eval, demo, and checkpoint reload commands without paying compile cost again.
 - `python model/main.py --train --no-eval --opencl-platform-index 0 --opencl-device-index 0`
   runs the normal workflow but pins execution to a specific OpenCL platform and
   device index, which is useful on machines with multiple OpenCL providers.
@@ -98,6 +103,9 @@ Useful flags:
   enable autoregressive generation in interactive mode
 - `--max-tokens N`
   limit how many tokens interactive generation may continue for
+- `--shell`
+  launch the developer runtime shell, which reuses the currently compiled runtime
+  for commands like status, prediction, evaluation, and checkpoint reload
 - `--opencl-platform-index N`
   choose which OpenCL platform index to use; defaults to `CANVAS_OPENCL_PLATFORM_INDEX` if set, otherwise `0`
 - `--opencl-device-index N`
@@ -119,6 +127,34 @@ Inside interactive mode, slash commands are supported:
 - `/reset`
 - `/exit`
 - `/quit`
+
+## Developer Shell Commands
+
+Inside the developer shell, slash commands are supported:
+
+- `/help`
+  print the available shell commands and their behavior
+- `/status`
+  show the active checkpoint path, training configuration, compile backend/device,
+  and accumulated simulator invocation counters
+- `/reset`
+  clear the persistent context state so the next prompt starts from a fresh sequence boundary
+- `/predict <text>`
+  feed the provided text through the current context path and print the next-token candidates
+- `/generate <text>`
+  feed the provided text through the current context path and continue autoregressively
+- `/eval`
+  run the standard evaluation routine against the loaded testing set without recompiling
+- `/demo`
+  print sample next-token predictions from the testing set without recompiling
+- `/load`
+  reload the configured checkpoint into the current runtime and reset context afterward
+- `/exit`
+- `/quit`
+
+Bare text in the developer shell is treated as a shorthand prediction request.
+Context persists across `/predict`, `/generate`, and bare-text prompts until you
+run `/reset`, so sequence boundaries remain explicit.
 
 Telemetry is written locally to `model/results/` as timestamped `telemetry_*.json` files.
 These files now include aggregate simulator activity plus explicit
