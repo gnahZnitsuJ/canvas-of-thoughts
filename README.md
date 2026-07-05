@@ -36,6 +36,7 @@ python model/main.py --eval --max-examples 50
 python model/main.py --demo --max-demo-examples 10 --top-k 3
 python model/main.py --interactive --generate --top-k 5 --max-tokens 15
 python model/main.py --shell --top-k 5 --max-tokens 15
+python model/main.py --train --probe-mode minimal
 python model/main.py --train --no-eval --opencl-platform-index 0 --opencl-device-index 0
 ```
 
@@ -58,6 +59,9 @@ python model/main.py --train --no-eval --opencl-platform-index 0 --opencl-device
   loads the checkpoint and opens a persistent developer shell on top of the
   already-compiled runtime. That shell can run status, reset, predict, generate,
   eval, demo, and checkpoint reload commands without paying compile cost again.
+- `python model/main.py --train --probe-mode minimal`
+  builds the normal workflow with only the required prediction probe. This is
+  the lighter instrumentation mode for compile-sensitive development runs.
 - `python model/main.py --train --no-eval --opencl-platform-index 0 --opencl-device-index 0`
   runs the normal workflow but pins execution to a specific OpenCL platform and
   device index, which is useful on machines with multiple OpenCL providers.
@@ -84,6 +88,7 @@ Benchmark runs now produce both:
 - raw timestamped telemetry JSON in `model/results/`
 - a timestamped markdown summary in `model/results/` that is easier to paste into notes
 - explicit OpenCL platform/device reporting in both console output and saved telemetry
+- active probe-mode reporting plus created/skipped probe labels in telemetry
 
 Useful flags:
 
@@ -106,6 +111,9 @@ Useful flags:
 - `--shell`
   launch the developer runtime shell, which reuses the currently compiled runtime
   for commands like status, prediction, evaluation, and checkpoint reload
+- `--probe-mode minimal|debug`
+  choose how much build-time probe instrumentation to keep; `minimal` keeps only
+  the required prediction probe, while `debug` keeps the richer diagnostic probes
 - `--opencl-platform-index N`
   choose which OpenCL platform index to use; defaults to `CANVAS_OPENCL_PLATFORM_INDEX` if set, otherwise `0`
 - `--opencl-device-index N`

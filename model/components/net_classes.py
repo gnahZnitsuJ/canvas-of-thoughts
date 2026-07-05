@@ -5,6 +5,7 @@ import nengo_spa as spa
 from nengo_spa.network import Network
 import numpy as np
 from config import model_parameters as mp
+from utils.probes import ProbeRegistry
 
 
 class BaseComponent(Network):
@@ -15,12 +16,14 @@ class BaseComponent(Network):
         model_vocab,
         context_in,
         target_in,
+        probe_registry=None,
         label=None,
         seed=None,
         context_sub_length=mp.context_length,
         strict=mp.strict_vocab,
     ):
         super().__init__(label=label, seed=seed)
+        probe_registry = probe_registry or ProbeRegistry()
 
         with self:
             # Allow either an input-like module (with `.node()`) or a context
@@ -86,9 +89,14 @@ class BaseComponent(Network):
                     transform=-100 * np.ones((ens.n_neurons, 1)),
                 )
 
-            self.p_error = nengo.Probe(self.error.output, label="error")
-            self.p_post_state = nengo.Probe(self.post_state.output, label="post_state")
-            self.p_context = nengo.Probe(self.context, label="context")
+            # These probes are useful for inspection and debugging, but normal
+            # prediction/evaluation only requires the top-level prediction probe.
+            self.p_error = probe_registry.debug(self.error.output, label="error")
+            self.p_post_state = probe_registry.debug(
+                self.post_state.output,
+                label="post_state",
+            )
+            self.p_context = probe_registry.debug(self.context, label="context")
 
             # Component prediction output.
             self.prediction = self.post_state

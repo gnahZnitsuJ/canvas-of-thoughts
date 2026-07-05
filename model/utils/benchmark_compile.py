@@ -52,12 +52,17 @@ def make_vocab(dimensions):
     return vocab
 
 
-def compile_case(name, sub_lengths, dimensions, simulator_name, context):
+def compile_case(name, sub_lengths, dimensions, simulator_name, context, probe_mode):
     with representation_dimension(dimensions):
         vocab = make_vocab(dimensions)
 
         start = perf_counter()
-        model_result = nc.Model(sub_lengths, vocab, strict=False)
+        model_result = nc.Model(
+            sub_lengths,
+            vocab,
+            strict=False,
+            probe_mode=probe_mode,
+        )
         model_build_seconds = perf_counter() - start
 
         start = perf_counter()
@@ -80,10 +85,16 @@ def compile_case(name, sub_lengths, dimensions, simulator_name, context):
             "sub_lengths": sub_lengths,
             "context_length": max(sub_lengths),
             "rep_vocab_dim": dimensions,
+            "probe_mode": model_result.probe_mode,
             "model_build_seconds": model_build_seconds,
             "simulator_compile_seconds": simulator_compile_seconds,
             "network": network_telemetry(model_result.model),
             "operators": operator_telemetry(simulator),
+            "probes": {
+                "mode": model_result.probe_mode,
+                "created_labels": model_result.created_probe_labels,
+                "skipped_labels": model_result.skipped_probe_labels,
+            },
         }
 
         simulator.close()
@@ -132,7 +143,7 @@ def build_base_component(vocab):
     return network
 
 
-def benchmark(mode, platform_index=None, device_index=None):
+def benchmark(mode, platform_index=None, device_index=None, probe_mode="debug"):
     opencl_selection = select_opencl_device(
         platform_index=platform_index,
         device_index=device_index,
@@ -156,12 +167,26 @@ def benchmark(mode, platform_index=None, device_index=None):
     simulator_comparison = []
     if mode == "full":
         scaling = [
-            compile_case(name, sub_lengths, dimensions, "nengo_ocl", context)
+            compile_case(
+                name,
+                sub_lengths,
+                dimensions,
+                "nengo_ocl",
+                context,
+                probe_mode,
+            )
             for name, sub_lengths, dimensions in scaling_cases
         ]
 
         simulator_comparison = [
-            compile_case("comparison", [1, 20], 64, simulator, context)
+            compile_case(
+                "comparison",
+                [1, 20],
+                64,
+                simulator,
+                context,
+                probe_mode,
+            )
             for simulator in ("nengo", "nengo_ocl")
         ]
     elif mode == "current":
@@ -172,6 +197,7 @@ def benchmark(mode, platform_index=None, device_index=None):
                 mp.rep_vocab_dim,
                 "nengo_ocl",
                 context,
+                probe_mode,
             )
         ]
 
@@ -198,6 +224,7 @@ def benchmark(mode, platform_index=None, device_index=None):
             "opencl_platform_index": opencl_selection["platform_index"],
             "opencl_device_index": opencl_selection["device_index"],
         },
+        "probe_mode": probe_mode,
         "scaling": scaling,
         "simulator_comparison": simulator_comparison,
         "component_costs": component_costs,
@@ -240,9 +267,16 @@ if __name__ == "__main__":
             "Defaults to CANVAS_OPENCL_DEVICE_INDEX if set, otherwise 0."
         ),
     )
+    parser.add_argument(
+        "--probe-mode",
+        choices=("minimal", "debug"),
+        default="debug",
+        help="Instrumentation surface to use while building benchmark cases.",
+    )
     args = parser.parse_args()
     benchmark(
         args.mode,
         platform_index=args.platform_index,
         device_index=args.device_index,
+        probe_mode=args.probe_mode,
     )

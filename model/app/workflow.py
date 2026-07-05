@@ -278,10 +278,7 @@ def make_compile_fingerprint(model_result, compile_profile, opencl_selection):
         "sub_lengths": model_result.sub_lengths,
         "sub_lengths_mode": "legacy_deferred",
         "training_semantics_version": TRAINING_SEMANTICS_VERSION,
-        # Probe modes and learned-init modes are not configurable yet, but we
-        # record the current baseline explicitly so future runs can compare
-        # against it cleanly once those knobs become real CLI options.
-        "probe_mode": "debug",
+        "probe_mode": model_result.probe_mode,
         "learned_init_mode": "random-function",
         "learned_init_seed": None,
         "compile_profile": {
@@ -305,6 +302,7 @@ def build_runtime(
     step_time=DEFAULT_STEP_TIME,
     first_run_warmup=False,
     profile_compile=False,
+    probe_mode="debug",
 ):
     """Build the model, select an OpenCL device, and compile the simulator."""
     start = perf_counter()
@@ -312,6 +310,7 @@ def build_runtime(
         sub_lengths=[1, mp.context_length],
         model_vocab=model_vocab,
         strict=mp.strict_vocab,
+        probe_mode=probe_mode,
     )
     timings["Model build"] = perf_counter() - start
 
@@ -495,11 +494,17 @@ def save_run_telemetry(
             "sub_lengths_mode": "legacy_deferred",
             "context_length": mp.context_length,
             "rep_vocab_dim": mp.rep_vocab_dim,
+            "probe_mode": model_result.probe_mode,
             "training_restriction": mp.training_restriction,
             "testing_restriction": mp.testing_restriction,
             "active_context_path": "root_context_module",
             "evaluation_mode": "streaming",
             **runtime.training_configuration(),
+        },
+        "probes": {
+            "mode": model_result.probe_mode,
+            "created_labels": model_result.created_probe_labels,
+            "skipped_labels": model_result.skipped_probe_labels,
         },
         "timings_seconds": timings,
         "compile_profile": compile_profile,

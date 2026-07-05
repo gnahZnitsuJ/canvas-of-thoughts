@@ -32,6 +32,7 @@ def main():
             BENCHMARK_MODE_MAP[args.benchmark],
             platform_index=args.opencl_platform_index,
             device_index=args.opencl_device_index,
+            probe_mode=args.probe_mode,
         )
         return
 
@@ -71,6 +72,7 @@ def main():
         step_time=training_config["step_time"],
         first_run_warmup=args.first_run_warmup,
         profile_compile=args.profile_compile,
+        probe_mode=args.probe_mode,
     )
     runtime.configure_training(
         training_mode=training_config["training_mode"],

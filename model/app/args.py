@@ -134,6 +134,16 @@ def parse_args():
         help="Write a cProfile .prof artifact for simulator construction under model/results/.",
     )
     parser.add_argument(
+        "--probe-mode",
+        choices=["minimal", "debug"],
+        default="debug",
+        help=(
+            "Instrumentation surface for model probes. "
+            "'minimal' keeps only required probes, while 'debug' keeps the "
+            "current richer probe set."
+        ),
+    )
+    parser.add_argument(
         "--max-examples",
         type=int,
         default=50,

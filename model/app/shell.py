@@ -78,6 +78,7 @@ def _print_status(runtime, checkpoint_path):
         print(f"backend:                 {compile_fingerprint.get('backend')}")
         print(f"OpenCL platform:         {compile_fingerprint.get('opencl_platform')}")
         print(f"OpenCL device:           {compile_fingerprint.get('opencl_device')}")
+        print(f"probe mode:              {compile_fingerprint.get('probe_mode')}")
         print(f"compile profile:         {compile_profile.get('name', 'full')}")
 
 

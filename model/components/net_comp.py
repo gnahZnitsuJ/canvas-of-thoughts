@@ -6,6 +6,7 @@ import numpy as np
 import nengo
 import nengo_spa as spa
 import components.net_classes as ncls
+from utils.probes import ProbeRegistry
 
 
 class ModelResult:
@@ -21,14 +22,21 @@ class ModelResult:
         model,
         context_module,
         active_component,
+        probe_registry,
         strict=None,
         learning_connections=None,
         sub_lengths=None,
         legacy_context_modules=None,
     ):
         self.model = model
-        self.p_error = [t for t in model.probes if t.label == "error"][0]
-        self.p_post_state = [t for t in model.probes if t.label == "post_state"][0]
+        self.probe_mode = probe_registry.mode
+        self.created_probe_labels = list(probe_registry.created_probe_labels)
+        self.skipped_probe_labels = list(probe_registry.skipped_probe_labels)
+        self.p_error = next((t for t in model.probes if t.label == "error"), None)
+        self.p_post_state = next(
+            (t for t in model.probes if t.label == "post_state"),
+            None,
+        )
         self.p_pred = [t for t in model.probes if t.label == "prediction"][0]
         self.input_module = model.input_module
         self.target_module = model.target_module
@@ -53,12 +61,13 @@ class ModelResult:
 
 
 # function that returns a model result object containing the desired model
-def Model(sub_lengths, model_vocab, strict=mp.strict_vocab):
+def Model(sub_lengths, model_vocab, strict=mp.strict_vocab, probe_mode="debug"):
     """Build the model around one active root-context prediction path.
 
     `sub_lengths` is retained for compatibility and telemetry, but the old
     per-component context fan-out is intentionally deferred/legacy.
     """
+    probe_registry = ProbeRegistry(mode=probe_mode)
     with spa.Network(seed=mp.seed) as model:
         input_module = InputModule(dim=mp.rep_vocab_dim)
         target_module = InputModule(dim=mp.rep_vocab_dim)
@@ -74,6 +83,7 @@ def Model(sub_lengths, model_vocab, strict=mp.strict_vocab):
             context_in=context_module,
             target_in=target_module,
             model_vocab=model_vocab,
+            probe_registry=probe_registry,
             strict=mp.strict_vocab,
         )
 
@@ -115,12 +125,16 @@ def Model(sub_lengths, model_vocab, strict=mp.strict_vocab):
             )
 
         # Probes to record simulation data
-        p_error = nengo.Probe(error.output, label="error")
-        p_post_state = nengo.Probe(post_state.output, label="post_state")
+        probe_registry.debug(error.output, label="error")
+        probe_registry.debug(post_state.output, label="post_state")
 
         # prediction and probe
         prediction = post_state
-        pred_probe = nengo.Probe(prediction.output, label="prediction", synapse=0.01)
+        probe_registry.required(
+            prediction.output,
+            label="prediction",
+            synapse=0.01,
+        )
 
         model.input_module = input_module
         model.target_module = target_module
@@ -131,6 +145,7 @@ def Model(sub_lengths, model_vocab, strict=mp.strict_vocab):
         model,
         context_module=context_module,
         active_component=active_component,
+        probe_registry=probe_registry,
         strict=strict,
         learning_connections=all_learning_connections,
         sub_lengths=sub_lengths,
