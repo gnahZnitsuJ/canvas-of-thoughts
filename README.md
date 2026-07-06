@@ -38,6 +38,10 @@ python model/main.py --interactive --generate --top-k 5 --max-tokens 15
 python model/main.py --shell --top-k 5 --max-tokens 15
 python model/main.py --train --probe-mode minimal
 python model/main.py --train --no-eval --opencl-platform-index 0 --opencl-device-index 0
+python model/main.py --dry-run --compile-profile fast-solver
+python model/main.py --build-only --probe-mode minimal --compile-profile fast-solver
+python model/main.py --inspect-checkpoint --checkpoint-path reuters_checkpoint.pkl
+python model/main.py --build-only --inspect-checkpoint --compare-current-architecture
 ```
 
 - `python model/main.py --train --no-eval --no-demo --no-interactive`
@@ -65,6 +69,19 @@ python model/main.py --train --no-eval --opencl-platform-index 0 --opencl-device
 - `python model/main.py --train --no-eval --opencl-platform-index 0 --opencl-device-index 0`
   runs the normal workflow but pins execution to a specific OpenCL platform and
   device index, which is useful on machines with multiple OpenCL providers.
+- `python model/main.py --dry-run --compile-profile fast-solver`
+  resolves the workflow, runtime settings, checkpoint target, and compile knobs
+  without loading data or building the Nengo model.
+- `python model/main.py --build-only --probe-mode minimal --compile-profile fast-solver`
+  loads data, builds the Python Nengo model, reports build timing and network
+  complexity, and stops before simulator compilation.
+- `python model/main.py --inspect-checkpoint --checkpoint-path reuters_checkpoint.pkl`
+  prints saved checkpoint metadata, including compile-profile and learned-init
+  information, without building or compiling the model.
+- `python model/main.py --build-only --inspect-checkpoint --compare-current-architecture`
+  combines checkpoint inspection with a current build-only pass so you can
+  compare the saved architecture signature against the present build before
+  paying OpenCL compile cost.
 
 Compile benchmark modes are available directly from `main.py`:
 
@@ -72,6 +89,7 @@ Compile benchmark modes are available directly from `main.py`:
 python model/main.py --benchmark compile-current
 python model/main.py --benchmark compile-components
 python model/main.py --benchmark compile-full
+python model/main.py --benchmark compile-repeat-current --benchmark-repeats 2
 ```
 
 - `compile-current`
@@ -83,6 +101,9 @@ python model/main.py --benchmark compile-full
 - `compile-full`
   runs the broader benchmark suite, including scaling-oriented cases, for deeper
   compile-time investigation.
+- `compile-repeat-current`
+  recompiles the current architecture repeatedly in one process so you can
+  compare cold-versus-warm compile behavior and optional post-compile warmup cost.
 
 Benchmark runs now produce both:
 - raw timestamped telemetry JSON in `model/results/`
@@ -94,10 +115,24 @@ Useful flags:
 
 - `--full`
   run the full workflow instead of the cheaper default path
+- `--dry-run`
+  print the resolved workflow and runtime plan without building the Nengo model
+- `--build-only`
+  build the Python Nengo model and stop before simulator compilation
+- `--inspect-checkpoint`
+  inspect checkpoint metadata without building or compiling the model
+- `--compare-current-architecture`
+  with `--build-only --inspect-checkpoint`, compare checkpoint metadata against the current build signature
 - `--checkpoint-path PATH`
   choose which checkpoint file to load or write under `model/checkpoints/`
 - `--force-retrain`
   ignore an existing checkpoint and retrain from scratch
+- `--compile-profile full|fast-solver`
+  choose the build profile; `fast-solver` lowers ensemble eval-point counts to reduce solver/setup cost
+- `--learned-init-mode random-function|zero-nosolver|seeded-nosolver`
+  choose how PES-learned decoded connections are initialized for compile/workflow experiments
+- `--learned-init-seed N`
+  provide a deterministic seed for seeded learned-connection initialization
 - `--max-examples N`
   cap how many evaluation examples are processed
 - `--max-demo-examples N`
@@ -120,6 +155,10 @@ Useful flags:
   choose which device index to use within the selected OpenCL platform; defaults to `CANVAS_OPENCL_DEVICE_INDEX` if set, otherwise `0`
 - `--no-telemetry`
   disable telemetry recording and skip writing a `telemetry_*.json` results file for the run
+- `--benchmark-repeats N`
+  choose how many times `compile-repeat-current` recompiles the current architecture
+- `--include-first-run-warmup`
+  for `compile-repeat-current`, run one post-compile warmup step per repeat and record its cost
 - `--no-eval`
   skip evaluation when using a workflow that would otherwise include it
 - `--no-demo`

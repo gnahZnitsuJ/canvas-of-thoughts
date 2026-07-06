@@ -12,6 +12,90 @@ from utils.processing import SPAVocabToWords, WordsToSPAVocab
 TRAINING_SEMANTICS_VERSION = "root_context_single_pass_v1"
 
 
+def resolve_checkpoint_path(filename):
+    """Resolve a checkpoint file name under model/checkpoints/ and create the directory."""
+    base_dir = os.path.dirname(os.path.dirname(__file__))
+    checkpoint_dir = os.path.join(base_dir, "checkpoints")
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    return os.path.join(checkpoint_dir, filename)
+
+
+def read_checkpoint_document(path="checkpoint.pkl"):
+    """Load a checkpoint pickle directly for no-compile inspection workflows."""
+    full_path = resolve_checkpoint_path(path)
+
+    if not os.path.isfile(full_path):
+        raise FileNotFoundError(f"Checkpoint not found: {path}")
+
+    with open(full_path, "rb") as checkpoint_file:
+        checkpoint = pickle.load(checkpoint_file)
+
+    return full_path, checkpoint
+
+
+def inspect_checkpoint_metadata(path="checkpoint.pkl"):
+    """Return the checkpoint metadata block and resolved path without compiling."""
+    full_path, checkpoint = read_checkpoint_document(path)
+    return full_path, checkpoint["metadata"]
+
+
+def _learning_connection_signature(conn):
+    """Capture simulator-independent structure for one learned connection."""
+    solver = getattr(conn, "solver", None)
+    learning_rule = getattr(conn, "learning_rule_type", None)
+
+    return {
+        "pre_type": type(conn.pre_obj).__name__,
+        "post_type": type(conn.post_obj).__name__,
+        "pre_neurons": getattr(conn.pre_obj, "n_neurons", None),
+        "post_neurons": getattr(conn.post_obj, "n_neurons", None),
+        "size_in": conn.size_in,
+        "size_out": conn.size_out,
+        "solver": type(solver).__name__ if solver is not None else None,
+        "solver_weights": getattr(solver, "weights", None) if solver is not None else None,
+        "function_present": conn.function is not None,
+        "learning_rule": (
+            type(learning_rule).__name__ if learning_rule is not None else None
+        ),
+    }
+
+
+def build_architecture_signature(
+    model_result,
+    model_vocab,
+    step_time,
+    compile_fingerprint=None,
+):
+    """Build the checkpoint-compatibility signature without requiring a simulator."""
+    compile_fingerprint = compile_fingerprint or {}
+    compile_profile = compile_fingerprint.get("compile_profile", {})
+
+    return {
+        "vocab_dim": model_vocab.dimensions,
+        "strict_vocab": model_result.strict,
+        "step_time": float(step_time),
+        "training_semantics_version": TRAINING_SEMANTICS_VERSION,
+        "num_learning_connections": len(model_result.learning_connections),
+        "learning_connection_signatures": [
+            _learning_connection_signature(conn)
+            for conn in model_result.learning_connections
+        ],
+        "sub_lengths": model_result.sub_lengths,
+        "compile_profile_name": compile_profile.get("name", model_result.compile_profile_name),
+        "compile_profile_settings": dict(
+            compile_profile.get("settings", model_result.compile_profile_settings)
+        ),
+        "learned_init_mode": compile_fingerprint.get(
+            "learned_init_mode",
+            model_result.learned_init_mode,
+        ),
+        "learned_init_seed": compile_fingerprint.get(
+            "learned_init_seed",
+            model_result.learned_init_seed,
+        ),
+    }
+
+
 class ModelRuntime:
     """Run training, recall, checkpoint, and calibration workflows."""
 
@@ -364,28 +448,16 @@ class ModelRuntime:
 
     # model checkpoint path
     def _resolve_checkpoint_path(self, filename):
-        base_dir = os.path.dirname(os.path.dirname(__file__))
-
-        checkpoint_dir = os.path.join(base_dir, "checkpoints")
-
-        os.makedirs(checkpoint_dir, exist_ok=True)
-
-        return os.path.join(checkpoint_dir, filename)
+        return resolve_checkpoint_path(filename)
 
     # validating loaded model architecture
     def _architecture_signature(self):
-        return {
-            "vocab_dim": self.model_vocab.dimensions,
-            "strict_vocab": self.model_result.strict,
-            "step_time": self.step_time,
-            "training_semantics_version": TRAINING_SEMANTICS_VERSION,
-            "num_learning_connections": len(self.model_result.learning_connections),
-            "learning_shapes": [
-                tuple(self._current_connection_weights(conn).shape)
-                for conn in self.model_result.learning_connections
-            ],
-            "sub_lengths": self.model_result.sub_lengths,
-        }
+        return build_architecture_signature(
+            self.model_result,
+            self.model_vocab,
+            self.step_time,
+            compile_fingerprint=self.compile_fingerprint,
+        )
 
     # saving model
     def save_checkpoint(self, path="checkpoint.pkl"):
@@ -441,9 +513,7 @@ class ModelRuntime:
         if not os.path.isfile(full_path):
             raise FileNotFoundError(f"Checkpoint not found: {path}")
 
-        with open(full_path, "rb") as checkpoint_file:
-            checkpoint = pickle.load(checkpoint_file)
-
+        full_path, checkpoint = read_checkpoint_document(path)
         metadata = checkpoint["metadata"]
         saved_weights = checkpoint["weights"]
 

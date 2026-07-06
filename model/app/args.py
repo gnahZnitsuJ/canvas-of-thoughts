@@ -6,6 +6,7 @@ BENCHMARK_MODE_MAP = {
     "compile-current": "current",
     "compile-components": "components",
     "compile-full": "full",
+    "compile-repeat-current": "repeat-current",
 }
 
 DEFAULT_CALIBRATION_CANDIDATES = None
@@ -37,6 +38,26 @@ def parse_args():
         "--benchmark",
         choices=sorted(BENCHMARK_MODE_MAP),
         help="Run a compile benchmark and exit.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Resolve workflow, runtime, and checkpoint plans without building the Nengo model.",
+    )
+    parser.add_argument(
+        "--build-only",
+        action="store_true",
+        help="Build the Python Nengo model and record complexity, but stop before simulator compilation.",
+    )
+    parser.add_argument(
+        "--inspect-checkpoint",
+        action="store_true",
+        help="Inspect checkpoint metadata without compiling the simulator.",
+    )
+    parser.add_argument(
+        "--compare-current-architecture",
+        action="store_true",
+        help="With --build-only and --inspect-checkpoint, compare checkpoint metadata against the current build signature.",
     )
     parser.add_argument(
         "--full",
@@ -134,6 +155,29 @@ def parse_args():
         help="Write a cProfile .prof artifact for simulator construction under model/results/.",
     )
     parser.add_argument(
+        "--compile-profile",
+        choices=["full", "fast-solver"],
+        default="full",
+        help=(
+            "Compile-time build profile. 'fast-solver' lowers ensemble eval-point "
+            "counts during build without changing the architecture layout."
+        ),
+    )
+    parser.add_argument(
+        "--learned-init-mode",
+        choices=["random-function", "zero-nosolver", "seeded-nosolver"],
+        default="random-function",
+        help=(
+            "Initialization strategy for PES-learned decoded connections. "
+            "'random-function' preserves the current behavior."
+        ),
+    )
+    parser.add_argument(
+        "--learned-init-seed",
+        type=int,
+        help="Optional deterministic seed for learned-connection initialization experiments.",
+    )
+    parser.add_argument(
         "--probe-mode",
         choices=["minimal", "debug"],
         default="debug",
@@ -193,6 +237,17 @@ def parse_args():
             "Defaults to CANVAS_OPENCL_DEVICE_INDEX if set, otherwise 0."
         ),
     )
+    parser.add_argument(
+        "--benchmark-repeats",
+        type=int,
+        default=2,
+        help="Repeat count for the compile-repeat-current benchmark mode.",
+    )
+    parser.add_argument(
+        "--include-first-run-warmup",
+        action="store_true",
+        help="For compile-repeat-current, run one post-compile warmup step per repeat and record it.",
+    )
     args = parser.parse_args()
 
     if args.shell and args.interactive:
@@ -203,6 +258,21 @@ def parse_args():
             "--full includes --interactive. Use --full --no-interactive --shell "
             "if you want the full workflow before the developer shell."
         )
+
+    if args.compare_current_architecture and not args.inspect_checkpoint:
+        parser.error("--compare-current-architecture requires --inspect-checkpoint.")
+
+    if args.compare_current_architecture and not args.build_only:
+        parser.error(
+            "--compare-current-architecture currently requires --build-only so "
+            "the current architecture can be compared without simulator compile."
+        )
+
+    if args.learned_init_mode == "seeded-nosolver" and args.learned_init_seed is None:
+        parser.error("--learned-init-mode seeded-nosolver requires --learned-init-seed.")
+
+    if args.benchmark_repeats < 1:
+        parser.error("--benchmark-repeats must be at least 1.")
 
     return args
 

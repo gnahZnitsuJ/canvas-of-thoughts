@@ -5,6 +5,7 @@ import nengo_spa as spa
 from nengo_spa.network import Network
 import numpy as np
 from config import model_parameters as mp
+from utils.build_config import make_learned_connection
 from utils.probes import ProbeRegistry
 
 
@@ -21,6 +22,8 @@ class BaseComponent(Network):
         seed=None,
         context_sub_length=mp.context_length,
         strict=mp.strict_vocab,
+        learned_init_mode="random-function",
+        learned_init_seed=None,
     ):
         super().__init__(label=label, seed=seed)
         probe_registry = probe_registry or ProbeRegistry()
@@ -63,11 +66,13 @@ class BaseComponent(Network):
 
             assert len(self.pre_state.all_ensembles) == 1
             assert len(self.post_state.all_ensembles) == 1
-            self.learning_connection = nengo.Connection(
+            self.learning_connection = make_learned_connection(
                 self.pre_state.all_ensembles[0],
                 self.post_state.all_ensembles[0],
-                function=lambda x: np.random.random(model_vocab.dimensions),
-                learning_rule_type=nengo.PES(mp.model_lr * 0.5),
+                dimensions=model_vocab.dimensions,
+                learning_rate=mp.model_lr * 0.5,
+                init_mode=learned_init_mode,
+                init_seed=learned_init_seed,
             )
             nengo.Connection(
                 self.error.output,

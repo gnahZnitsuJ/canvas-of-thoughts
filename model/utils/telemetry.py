@@ -274,6 +274,15 @@ def render_compile_benchmark_summary(payload, telemetry_path=None):
             ]
         )
 
+    compile_profile = payload.get("compile_profile")
+    if compile_profile:
+        lines.append(f"- Compile profile: `{compile_profile.get('name')}`")
+        lines.append(f"- Compile settings: `{compile_profile.get('settings')}`")
+
+    if payload.get("learned_init_mode") is not None:
+        lines.append(f"- Learned init mode: `{payload.get('learned_init_mode')}`")
+        lines.append(f"- Learned init seed: `{payload.get('learned_init_seed')}`")
+
     sections = [
         ("Scaling", payload.get("scaling", []), True),
         ("Simulator Comparison", payload.get("simulator_comparison", []), True),
@@ -316,6 +325,46 @@ def render_compile_benchmark_summary(payload, telemetry_path=None):
         lines.append(_row_to_markdown(divider))
         for case in cases:
             lines.append(_row_to_markdown(_case_row(case, include_sub_lengths)))
+
+    repeat_compile = payload.get("repeat_compile", [])
+    if repeat_compile:
+        lines.extend(
+            [
+                "",
+                "## Repeat Compile",
+                "",
+                _row_to_markdown(
+                    [
+                        "repeat",
+                        "build_s",
+                        "compile_s",
+                        "warmup_s",
+                        "operators",
+                        "ensembles",
+                        "neurons",
+                    ]
+                ),
+                _row_to_markdown(["---"] * 7),
+            ]
+        )
+        for case in repeat_compile:
+            lines.append(
+                _row_to_markdown(
+                    [
+                        str(case.get("repeat_index")),
+                        _format_seconds(case["model_build_seconds"]),
+                        _format_seconds(case["simulator_compile_seconds"]),
+                        (
+                            _format_seconds(case["first_run_warmup_seconds"])
+                            if case.get("first_run_warmup_seconds") is not None
+                            else "-"
+                        ),
+                        _format_int(case["operators"]["operator_count"]),
+                        _format_int(case["network"]["ensemble_count"]),
+                        _format_int(case["network"]["neuron_count"]),
+                    ]
+                )
+            )
 
     return "\n".join(lines) + "\n"
 
@@ -370,3 +419,23 @@ def print_compile_benchmark_summary(payload):
                     f"{case['operators']['operator_count']:>10,} "
                     f"{case['network']['ensemble_count']:>8,}"
                 )
+
+    repeat_compile = payload.get("repeat_compile", [])
+    if repeat_compile:
+        header = (
+            f"{'repeat':<8} {'build_s':>9} {'compile_s':>10} "
+            f"{'warmup_s':>10} {'ops':>10} {'ens':>8}"
+        )
+        print("\nRepeat Compile:")
+        print(header)
+        print("-" * len(header))
+        for case in repeat_compile:
+            warmup_seconds = case.get("first_run_warmup_seconds")
+            print(
+                f"{case.get('repeat_index', '-'): <8} "
+                f"{case['model_build_seconds']:>9.3f} "
+                f"{case['simulator_compile_seconds']:>10.3f} "
+                f"{(warmup_seconds if warmup_seconds is not None else 0.0):>10.3f} "
+                f"{case['operators']['operator_count']:>10,} "
+                f"{case['network']['ensemble_count']:>8,}"
+            )

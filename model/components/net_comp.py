@@ -6,6 +6,7 @@ import numpy as np
 import nengo
 import nengo_spa as spa
 import components.net_classes as ncls
+from utils.build_config import make_learned_connection
 from utils.probes import ProbeRegistry
 
 
@@ -27,6 +28,10 @@ class ModelResult:
         learning_connections=None,
         sub_lengths=None,
         legacy_context_modules=None,
+        learned_init_mode="random-function",
+        learned_init_seed=None,
+        compile_profile_name="full",
+        compile_profile_settings=None,
     ):
         self.model = model
         self.probe_mode = probe_registry.mode
@@ -53,6 +58,10 @@ class ModelResult:
         self.strict = strict
         self.learning_connections = learning_connections or []
         self.sub_lengths = sub_lengths
+        self.learned_init_mode = learned_init_mode
+        self.learned_init_seed = learned_init_seed
+        self.compile_profile_name = compile_profile_name
+        self.compile_profile_settings = dict(compile_profile_settings or {})
 
         model.context_module = context_module
         model.primary_context_module = context_module
@@ -61,7 +70,16 @@ class ModelResult:
 
 
 # function that returns a model result object containing the desired model
-def Model(sub_lengths, model_vocab, strict=mp.strict_vocab, probe_mode="debug"):
+def Model(
+    sub_lengths,
+    model_vocab,
+    strict=mp.strict_vocab,
+    probe_mode="debug",
+    learned_init_mode="random-function",
+    learned_init_seed=None,
+    compile_profile_name="full",
+    compile_profile_settings=None,
+):
     """Build the model around one active root-context prediction path.
 
     `sub_lengths` is retained for compatibility and telemetry, but the old
@@ -85,6 +103,10 @@ def Model(sub_lengths, model_vocab, strict=mp.strict_vocab, probe_mode="debug"):
             model_vocab=model_vocab,
             probe_registry=probe_registry,
             strict=mp.strict_vocab,
+            learned_init_mode=learned_init_mode,
+            learned_init_seed=(
+                None if learned_init_seed is None else learned_init_seed + 1
+            ),
         )
 
         target_node = target_module.node()
@@ -106,11 +128,13 @@ def Model(sub_lengths, model_vocab, strict=mp.strict_vocab, probe_mode="debug"):
         # learning between ensembles
         # assert len(pre_state.all_ensembles) == 1
         # assert len(post_state.all_ensembles) == 1
-        learning_connection = nengo.Connection(
+        learning_connection = make_learned_connection(
             pre_state.all_ensembles[0],
             post_state.all_ensembles[0],
-            function=lambda x: np.random.random(model_vocab.dimensions),
-            learning_rule_type=nengo.PES(mp.model_lr * 0.5),  # Prescribed Error Sensitivity
+            dimensions=model_vocab.dimensions,
+            learning_rate=mp.model_lr * 0.5,
+            init_mode=learned_init_mode,
+            init_seed=learned_init_seed,
         )
         nengo.Connection(error.output, learning_connection.learning_rule, transform=-1)
 
@@ -150,4 +174,8 @@ def Model(sub_lengths, model_vocab, strict=mp.strict_vocab, probe_mode="debug"):
         learning_connections=all_learning_connections,
         sub_lengths=sub_lengths,
         legacy_context_modules=legacy_context_modules,
+        learned_init_mode=learned_init_mode,
+        learned_init_seed=learned_init_seed,
+        compile_profile_name=compile_profile_name,
+        compile_profile_settings=compile_profile_settings,
     )

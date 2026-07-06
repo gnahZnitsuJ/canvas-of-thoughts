@@ -13,9 +13,15 @@ from gensim.models import Word2Vec
 from nltk.corpus import reuters
 
 import components.net_comp as nc
-from components.runtime import ModelRuntime, TRAINING_SEMANTICS_VERSION
+from components.runtime import (
+    ModelRuntime,
+    TRAINING_SEMANTICS_VERSION,
+    build_architecture_signature,
+    inspect_checkpoint_metadata,
+)
 from config import model_parameters as mp
 from utils import seed_vocab
+from utils.build_config import compile_profile_scope, resolve_compile_profile
 from utils.calibration import calibrate_token_duration
 from utils.eval import iter_next_token_predictions
 from utils.input import make_unitary
@@ -182,6 +188,34 @@ def compile_profile_environment():
     }
 
 
+def build_model_result(
+    model_vocab,
+    timings,
+    *,
+    probe_mode="debug",
+    compile_profile_name="full",
+    learned_init_mode="random-function",
+    learned_init_seed=None,
+):
+    """Build the Python-side Nengo model without compiling a simulator."""
+    compile_profile_config = resolve_compile_profile(compile_profile_name)
+
+    start = perf_counter()
+    with compile_profile_scope(compile_profile_config):
+        model_result = nc.Model(
+            sub_lengths=[1, mp.context_length],
+            model_vocab=model_vocab,
+            strict=mp.strict_vocab,
+            probe_mode=probe_mode,
+            learned_init_mode=learned_init_mode,
+            learned_init_seed=learned_init_seed,
+            compile_profile_name=compile_profile_config["name"],
+            compile_profile_settings=compile_profile_config["settings"],
+        )
+    timings["Model build"] = perf_counter() - start
+    return model_result, compile_profile_config
+
+
 def construct_simulator(model, context, profile_compile=False):
     """Construct the simulator, optionally wrapping the build in cProfile."""
     profile_output_path = None
@@ -237,8 +271,10 @@ def make_compile_profile(
     first_run_warmup_enabled,
     profile_compile_enabled,
     profile_output_path,
-    platform,
-    device,
+    platform=None,
+    device=None,
+    compile_profile_name="full",
+    compile_profile_settings=None,
 ):
     """Assemble the compile-phase telemetry block for normal workflow runs."""
     return {
@@ -253,25 +289,36 @@ def make_compile_profile(
             if profile_output_path is not None
             else None
         ),
-        "opencl_platform": platform.name,
-        "opencl_device": device.name,
+        "opencl_platform": platform.name if platform is not None else None,
+        "opencl_device": device.name if device is not None else None,
+        "name": compile_profile_name,
+        "settings": dict(compile_profile_settings or {}),
         "environment": compile_profile_environment(),
     }
 
 
-def make_compile_fingerprint(model_result, compile_profile, opencl_selection):
+def make_compile_fingerprint(
+    model_result,
+    compile_profile,
+    *,
+    opencl_selection=None,
+    learned_init_mode="random-function",
+    learned_init_seed=None,
+):
     """Record the configuration that produced a compile result.
 
     This scaffolding is broader than checkpoint compatibility. It captures both
     architectural context and workflow/profile knobs so future comparisons do
     not accidentally mix unlike runs.
     """
+    opencl_selection = opencl_selection or {}
+
     return {
         "backend": compile_profile["backend"],
         "opencl_platform": compile_profile["opencl_platform"],
         "opencl_device": compile_profile["opencl_device"],
-        "opencl_platform_index": opencl_selection["platform_index"],
-        "opencl_device_index": opencl_selection["device_index"],
+        "opencl_platform_index": opencl_selection.get("platform_index"),
+        "opencl_device_index": opencl_selection.get("device_index"),
         "rep_vocab_dim": mp.rep_vocab_dim,
         "context_length": mp.context_length,
         "strict_vocab": mp.strict_vocab,
@@ -279,10 +326,11 @@ def make_compile_fingerprint(model_result, compile_profile, opencl_selection):
         "sub_lengths_mode": "legacy_deferred",
         "training_semantics_version": TRAINING_SEMANTICS_VERSION,
         "probe_mode": model_result.probe_mode,
-        "learned_init_mode": "random-function",
-        "learned_init_seed": None,
+        "learned_init_mode": learned_init_mode,
+        "learned_init_seed": learned_init_seed,
         "compile_profile": {
-            "name": "full",
+            "name": compile_profile["name"],
+            "settings": dict(compile_profile.get("settings", {})),
             "first_run_warmup_enabled": compile_profile[
                 "first_run_warmup_enabled"
             ],
@@ -303,16 +351,19 @@ def build_runtime(
     first_run_warmup=False,
     profile_compile=False,
     probe_mode="debug",
+    compile_profile_name="full",
+    learned_init_mode="random-function",
+    learned_init_seed=None,
 ):
     """Build the model, select an OpenCL device, and compile the simulator."""
-    start = perf_counter()
-    model_result = nc.Model(
-        sub_lengths=[1, mp.context_length],
-        model_vocab=model_vocab,
-        strict=mp.strict_vocab,
+    model_result, compile_profile_config = build_model_result(
+        model_vocab,
+        timings,
         probe_mode=probe_mode,
+        compile_profile_name=compile_profile_name,
+        learned_init_mode=learned_init_mode,
+        learned_init_seed=learned_init_seed,
     )
-    timings["Model build"] = perf_counter() - start
 
     opencl_selection = select_opencl_device(
         platform_index=opencl_platform_index,
@@ -349,11 +400,15 @@ def build_runtime(
         profile_output_path=profile_output_path,
         platform=platform,
         device=device,
+        compile_profile_name=compile_profile_config["name"],
+        compile_profile_settings=compile_profile_config["settings"],
     )
     compile_fingerprint = make_compile_fingerprint(
         model_result,
         compile_profile,
-        opencl_selection,
+        opencl_selection=opencl_selection,
+        learned_init_mode=learned_init_mode,
+        learned_init_seed=learned_init_seed,
     )
     runtime.set_compile_fingerprint(compile_fingerprint)
     return (
@@ -365,6 +420,157 @@ def build_runtime(
         compile_profile,
         compile_fingerprint,
     )
+
+
+def print_dry_run_summary(args, workflow, training_config):
+    """Report the resolved workflow plan without building the model."""
+    print("\nDry run summary:\n")
+    print(f"workflow:                {workflow}")
+    print(f"checkpoint path:         {args.checkpoint_path}")
+    print(f"compile profile:         {args.compile_profile}")
+    print(f"learned init mode:       {args.learned_init_mode}")
+    print(f"learned init seed:       {args.learned_init_seed}")
+    print(f"probe mode:              {args.probe_mode}")
+    print(f"telemetry enabled:       {not args.no_telemetry}")
+    print(f"training mode:           {training_config['training_mode']}")
+    print(f"token duration:          {training_config['token_duration']:.6f} sec")
+    print(f"token duration source:   {training_config['token_duration_source']}")
+    print(f"step time:               {training_config['step_time']:.6f} sec")
+    print(f"first-run warmup:        {args.first_run_warmup}")
+    print(f"profile compile:         {args.profile_compile}")
+
+
+def load_checkpoint_metadata(checkpoint_path):
+    """Load checkpoint metadata for inspection-oriented workflows."""
+    return inspect_checkpoint_metadata(checkpoint_path)
+
+
+def print_checkpoint_metadata(checkpoint_path, full_path, metadata):
+    """Render checkpoint metadata in a readable console summary."""
+    print("\nCheckpoint inspection:\n")
+    print(f"requested path:          {checkpoint_path}")
+    print(f"resolved path:           {full_path}")
+    print(f"timestamp:               {metadata.get('timestamp')}")
+
+    architecture = metadata.get("architecture", {})
+    compile_fingerprint = metadata.get("compile_fingerprint", {})
+    compile_profile = compile_fingerprint.get("compile_profile", {})
+
+    print(f"training semantics:      {architecture.get('training_semantics_version')}")
+    print(f"vocab dim:               {architecture.get('vocab_dim')}")
+    print(f"context length:          {compile_fingerprint.get('context_length')}")
+    print(f"sub_lengths:             {architecture.get('sub_lengths')}")
+    print(f"probe mode:              {compile_fingerprint.get('probe_mode')}")
+    print(f"compile profile:         {compile_profile.get('name')}")
+    print(f"compile settings:        {compile_profile.get('settings')}")
+    print(f"learned init mode:       {architecture.get('learned_init_mode')}")
+    print(f"learned init seed:       {architecture.get('learned_init_seed')}")
+    print(f"backend:                 {compile_fingerprint.get('backend')}")
+    print(f"OpenCL platform:         {compile_fingerprint.get('opencl_platform')}")
+    print(f"OpenCL device:           {compile_fingerprint.get('opencl_device')}")
+
+
+def compare_architecture_to_checkpoint(
+    model_result,
+    model_vocab,
+    step_time,
+    compile_fingerprint,
+    checkpoint_metadata,
+):
+    """Compare the current no-compile build signature against checkpoint metadata."""
+    current_architecture = build_architecture_signature(
+        model_result,
+        model_vocab,
+        step_time,
+        compile_fingerprint=compile_fingerprint,
+    )
+    saved_architecture = checkpoint_metadata.get("architecture", {})
+    matches = saved_architecture == current_architecture
+
+    return {
+        "matches": matches,
+        "saved": saved_architecture,
+        "current": current_architecture,
+    }
+
+
+def print_architecture_comparison(comparison):
+    """Report whether the current build matches checkpoint architecture metadata."""
+    if comparison["matches"]:
+        print("\nCheckpoint architecture matches the current build-only signature.")
+        return
+
+    print("\nCheckpoint architecture mismatch.")
+    print(f"\nSaved:\n{comparison['saved']}")
+    print(f"\nCurrent:\n{comparison['current']}")
+
+
+def save_build_only_telemetry(
+    model_result,
+    model_vocab,
+    timings,
+    training_config,
+    compile_profile_name,
+    compile_profile_settings,
+    learned_init_mode,
+    learned_init_seed,
+    checkpoint_comparison=None,
+):
+    """Persist telemetry for build-only runs that stop before simulator compile."""
+    compile_profile = make_compile_profile(
+        backend="not_compiled",
+        timings=timings,
+        first_run_warmup_enabled=False,
+        profile_compile_enabled=False,
+        profile_output_path=None,
+        platform=None,
+        device=None,
+        compile_profile_name=compile_profile_name,
+        compile_profile_settings=compile_profile_settings,
+    )
+    compile_fingerprint = make_compile_fingerprint(
+        model_result,
+        compile_profile,
+        learned_init_mode=learned_init_mode,
+        learned_init_seed=learned_init_seed,
+    )
+
+    payload = {
+        "kind": "model_build_only",
+        "environment": environment_telemetry(),
+        "parameters": {
+            "sub_lengths": model_result.sub_lengths,
+            "sub_lengths_mode": "legacy_deferred",
+            "context_length": mp.context_length,
+            "rep_vocab_dim": mp.rep_vocab_dim,
+            "probe_mode": model_result.probe_mode,
+            "active_context_path": "root_context_module",
+            **training_config,
+        },
+        "probes": {
+            "mode": model_result.probe_mode,
+            "created_labels": model_result.created_probe_labels,
+            "skipped_labels": model_result.skipped_probe_labels,
+        },
+        "timings_seconds": timings,
+        "compile_profile": compile_profile,
+        "compile_fingerprint": compile_fingerprint,
+        "complexity": {
+            "network": network_telemetry(model_result.model),
+        },
+        "architecture_signature": build_architecture_signature(
+            model_result,
+            model_vocab,
+            training_config["step_time"],
+            compile_fingerprint=compile_fingerprint,
+        ),
+    }
+    if checkpoint_comparison is not None:
+        payload["checkpoint_comparison"] = checkpoint_comparison
+
+    telemetry_path = save_telemetry(RESULTS_DIR, payload)
+    print(f"\nSaved build-only telemetry to: {telemetry_path}")
+    return compile_fingerprint
 
 
 def run_demo_predictions(runtime, testing_set, max_examples, top_k):

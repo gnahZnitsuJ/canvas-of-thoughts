@@ -80,6 +80,18 @@ def _print_status(runtime, checkpoint_path):
         print(f"OpenCL device:           {compile_fingerprint.get('opencl_device')}")
         print(f"probe mode:              {compile_fingerprint.get('probe_mode')}")
         print(f"compile profile:         {compile_profile.get('name', 'full')}")
+        print(
+            f"compile settings:        "
+            f"{compile_profile.get('settings', {})}"
+        )
+        print(
+            f"learned init mode:       "
+            f"{compile_fingerprint.get('learned_init_mode')}"
+        )
+        print(
+            f"learned init seed:       "
+            f"{compile_fingerprint.get('learned_init_seed')}"
+        )
 
 
 def _run_eval(runtime, testing_set, max_examples, top_k):
