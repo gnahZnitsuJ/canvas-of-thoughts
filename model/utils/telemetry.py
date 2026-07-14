@@ -1,5 +1,8 @@
 ﻿import json
+import hashlib
+import os
 import platform
+import subprocess
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -44,10 +47,70 @@ def save_text_artifact(results_dir, text, prefix="summary", suffix=".md"):
 
 
 def environment_telemetry():
-    return {
+    environment = {
         "python": platform.python_version(),
         "platform": platform.platform(),
+        "PYOPENCL_NO_CACHE": os.environ.get("PYOPENCL_NO_CACHE"),
+        "PYOPENCL_COMPILER_OUTPUT": os.environ.get("PYOPENCL_COMPILER_OUTPUT"),
+        "PYOPENCL_BUILD_OPTIONS": os.environ.get("PYOPENCL_BUILD_OPTIONS"),
+        "PYOPENCL_CTX": os.environ.get("PYOPENCL_CTX"),
+        "CANVAS_OPENCL_PLATFORM_INDEX": os.environ.get(
+            "CANVAS_OPENCL_PLATFORM_INDEX"
+        ),
+        "CANVAS_OPENCL_DEVICE_INDEX": os.environ.get("CANVAS_OPENCL_DEVICE_INDEX"),
     }
+
+    repo_root = Path(__file__).resolve().parents[2]
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        ).stdout.strip()
+        status = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        ).stdout.strip()
+        source_files = subprocess.run(
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+            timeout=2,
+        ).stdout.split(b"\0")
+        snapshot = hashlib.sha256()
+        for relative_bytes in sorted(item for item in source_files if item):
+            relative_path = relative_bytes.decode("utf-8", errors="surrogateescape")
+            source_path = repo_root / relative_path
+            if not source_path.is_file():
+                continue
+            snapshot.update(relative_bytes)
+            snapshot.update(b"\0")
+            snapshot.update(source_path.read_bytes())
+            snapshot.update(b"\0")
+        source_snapshot = snapshot.hexdigest()
+    except (OSError, subprocess.SubprocessError):
+        commit = None
+        dirty = None
+        source_snapshot = None
+    else:
+        dirty = bool(status)
+
+    environment.update(
+        {
+            "source_commit": commit,
+            "source_dirty": dirty,
+            "source_snapshot": source_snapshot,
+        }
+    )
+    return environment
 
 
 def network_telemetry(network, largest_limit=10):

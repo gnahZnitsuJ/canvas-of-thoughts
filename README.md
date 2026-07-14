@@ -111,6 +111,48 @@ Benchmark runs now produce both:
 - explicit OpenCL platform/device reporting in both console output and saved telemetry
 - active probe-mode reporting plus created/skipped probe labels in telemetry
 
+## Named Development Workflows
+
+The transparent PowerShell wrapper keeps the baseline and development
+configurations explicit and prints the complete resolved command before running it:
+
+```powershell
+./scripts/model_workflows.ps1 plan
+./scripts/model_workflows.ps1 build-check
+./scripts/model_workflows.ps1 checkpoint-check
+./scripts/model_workflows.ps1 architecture-check
+./scripts/model_workflows.ps1 compile-baseline
+./scripts/model_workflows.ps1 compile-dev
+./scripts/model_workflows.ps1 shell-dev
+```
+
+The scientific baseline is `debug + full + random-function`. The non-baseline
+development configuration is `minimal + fast-solver + zero-nosolver`; it has
+different checkpoint compatibility and initial learning conditions. Use
+`-ShowOnly` to inspect a workflow without executing it and pass additional model
+arguments after the wrapper options when needed.
+
+The standard post-change validation sequence and architecture experiment template
+live in the companion L Research repository under
+`nengo-model/implementation instructions`.
+
+## Comparing Telemetry
+
+Compare any two or more compile, run, or build-only telemetry files without
+loading Nengo:
+
+```bash
+python scripts/compare_telemetry.py model/results/before.json model/results/after.json --vary compile_profile --markdown comparison.md --csv comparison.csv
+```
+
+The first selected record is the delta reference. The tool prints a concise
+console table, checks backend/device/dimension/context/profile/init controls,
+warns about unintended differences, and includes absolute and percentage deltas.
+Use `--strict` to fail on unexpected control changes, `--since`/`--until` for ISO
+timestamp filtering, or repeat `--where FIELD=VALUE` to filter normalized
+fingerprint fields. Run `python scripts/compare_telemetry.py --help` for the field
+and output options.
+
 Useful flags:
 
 - `--full`

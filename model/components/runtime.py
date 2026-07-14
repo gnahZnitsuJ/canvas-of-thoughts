@@ -96,6 +96,64 @@ def build_architecture_signature(
     }
 
 
+def _architecture_field_category(field):
+    if field.startswith("compile_profile_"):
+        return "compile-profile"
+    if field.startswith("learned_init_"):
+        return "learned-init"
+    if field in {"step_time", "training_semantics_version"}:
+        return "training-semantic"
+    return "structural"
+
+
+def compare_architecture_signatures(saved, current):
+    """Describe compatibility using the same signatures used by checkpoint loading."""
+    fields = []
+    for field in sorted(set(saved) | set(current)):
+        saved_value = saved.get(field)
+        current_value = current.get(field)
+        fields.append(
+            {
+                "field": field,
+                "matches": saved_value == current_value,
+                "saved": saved_value,
+                "current": current_value,
+                "category": _architecture_field_category(field),
+            }
+        )
+    return {
+        "matches": saved == current,
+        "saved": saved,
+        "current": current,
+        "fields": fields,
+        "mismatches": [field for field in fields if not field["matches"]],
+    }
+
+
+def format_architecture_comparison(comparison):
+    """Render a field-by-field checkpoint compatibility explanation."""
+    if comparison["matches"]:
+        return "Checkpoint architecture matches the current signature."
+
+    matching = [field["field"] for field in comparison["fields"] if field["matches"]]
+    lines = [
+        "Checkpoint architecture mismatch.",
+        "",
+        "Matching fields: " + (", ".join(matching) if matching else "none"),
+        "",
+        "Mismatched fields:",
+    ]
+    for mismatch in comparison["mismatches"]:
+        lines.extend(
+            [
+                f"- {mismatch['field']} [{mismatch['category']}]",
+                f"  saved:   {mismatch['saved']!r}",
+                f"  current: {mismatch['current']!r}",
+            ]
+        )
+    return "\n".join(lines)
+
+
 class ModelRuntime:
     """Run training, recall, checkpoint, and calibration workflows."""
 
@@ -520,12 +578,9 @@ class ModelRuntime:
         saved_arch = metadata["architecture"]
         current_arch = self._architecture_signature()
 
-        if saved_arch != current_arch:
-            raise ValueError(
-                "\nCheckpoint architecture mismatch.\n"
-                f"\nSaved:\n{saved_arch}\n"
-                f"\nCurrent:\n{current_arch}"
-            )
+        comparison = compare_architecture_signatures(saved_arch, current_arch)
+        if not comparison["matches"]:
+            raise ValueError("\n" + format_architecture_comparison(comparison))
 
         expected = len(self.model_result.learning_connections)
         actual = len(saved_weights)
