@@ -17,6 +17,8 @@ from components.runtime import (
     ModelRuntime,
     TRAINING_SEMANTICS_VERSION,
     build_architecture_signature,
+    compare_architecture_signatures,
+    format_architecture_comparison,
     inspect_checkpoint_metadata,
 )
 from config import model_parameters as mp
@@ -485,24 +487,12 @@ def compare_architecture_to_checkpoint(
         compile_fingerprint=compile_fingerprint,
     )
     saved_architecture = checkpoint_metadata.get("architecture", {})
-    matches = saved_architecture == current_architecture
-
-    return {
-        "matches": matches,
-        "saved": saved_architecture,
-        "current": current_architecture,
-    }
+    return compare_architecture_signatures(saved_architecture, current_architecture)
 
 
 def print_architecture_comparison(comparison):
     """Report whether the current build matches checkpoint architecture metadata."""
-    if comparison["matches"]:
-        print("\nCheckpoint architecture matches the current build-only signature.")
-        return
-
-    print("\nCheckpoint architecture mismatch.")
-    print(f"\nSaved:\n{comparison['saved']}")
-    print(f"\nCurrent:\n{comparison['current']}")
+    print("\n" + format_architecture_comparison(comparison))
 
 
 def save_build_only_telemetry(
