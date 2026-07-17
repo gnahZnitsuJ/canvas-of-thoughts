@@ -20,6 +20,7 @@ CONTROL_FIELDS = (
     "dimensions",
     "context_length",
     "sub_lengths",
+    "architecture_name",
     "probe_mode",
     "compile_profile.name",
     "compile_profile.settings",
@@ -49,6 +50,7 @@ GROUPS = {
         "dimensions",
         "context_length",
         "sub_lengths",
+        "architecture_name",
         "network_count",
         "ensemble_count",
         "neuron_count",
@@ -138,6 +140,10 @@ def normalize(document, path):
                 or parameters.get("sub_lengths")
                 or fingerprint.get("sub_lengths")
             ),
+            "architecture_name": case.get("architecture_name")
+            or parameters.get("architecture_name")
+            or fingerprint.get("architecture_name")
+            or document.get("architecture_name"),
             "probe_mode": case.get("probe_mode")
             or document.get("probe_mode")
             or parameters.get("probe_mode")
@@ -189,7 +195,8 @@ def normalize(document, path):
                 )
             ),
             "architecture_signature": _json_value(
-                document.get("architecture_signature", {})
+                case.get("architecture_signature")
+                or document.get("architecture_signature", {})
             ),
             "section": section,
             "repeat_index": repeat_index,
@@ -303,6 +310,76 @@ def _number(value, digits=3):
     return str(value)
 
 
+def semantic_architecture_diff(reference_signature, current_signature):
+    """Describe subsystem topology changes between two canonical signatures."""
+    reference = reference_signature.get(
+        "architecture_topology", reference_signature
+    )
+    current = current_signature.get("architecture_topology", current_signature)
+    changes = []
+
+    reference_components = {
+        component["name"]: component
+        for component in reference.get("components", [])
+    }
+    current_components = {
+        component["name"]: component
+        for component in current.get("components", [])
+    }
+    for name in sorted(reference_components.keys() - current_components.keys()):
+        changes.append(f"component removed: {name}")
+    for name in sorted(current_components.keys() - reference_components.keys()):
+        changes.append(f"component added: {name}")
+    for name in sorted(reference_components.keys() & current_components.keys()):
+        before = reference_components[name]
+        after = current_components[name]
+        if before.get("type") != after.get("type"):
+            changes.append(
+                f"component replaced: {name} "
+                f"({before.get('type')} -> {after.get('type')})"
+            )
+        for field in ("parameters", "ports", "capabilities", "implementation"):
+            if before.get(field) != after.get(field):
+                changes.append(f"component {name} changed {field}")
+
+    def connection_keys(signature):
+        return {
+            json.dumps(connection, sort_keys=True, separators=(",", ":"))
+            for connection in signature.get("connections", [])
+        }
+
+    reference_connections = connection_keys(reference)
+    current_connections = connection_keys(current)
+    for encoded in sorted(reference_connections - current_connections):
+        connection = json.loads(encoded)
+        changes.append(
+            "connection removed: "
+            f"{connection.get('source')} -> {connection.get('target')}"
+        )
+    for encoded in sorted(current_connections - reference_connections):
+        connection = json.loads(encoded)
+        changes.append(
+            "connection added: "
+            f"{connection.get('source')} -> {connection.get('target')}"
+        )
+
+    reference_roles = reference.get("roles", {})
+    current_roles = current.get("roles", {})
+    for role in sorted(set(reference_roles) | set(current_roles)):
+        if reference_roles.get(role) != current_roles.get(role):
+            changes.append(
+                f"role changed: {role} "
+                f"({reference_roles.get(role)} -> {current_roles.get(role)})"
+            )
+    if reference.get("checkpoint_order", []) != current.get("checkpoint_order", []):
+        changes.append(
+            "checkpoint order changed: "
+            f"{reference.get('checkpoint_order', [])} -> "
+            f"{current.get('checkpoint_order', [])}"
+        )
+    return changes
+
+
 def console_table(records):
     reference = records[0]
     header = (
@@ -410,8 +487,28 @@ def markdown_report(records, differences, messages):
         lines.append("| Field | " + " | ".join(f"Run {i}" for i in range(len(records))) + " |")
         lines.append("| --- | " + " | ".join("---" for _ in records) + " |")
         for field in changed_signature_fields:
-            values = [str(_json_value(signature.get(field))) for signature in signatures]
+            if field == "architecture_topology":
+                values = ["see semantic topology changes below" for _ in signatures]
+            else:
+                values = [
+                    str(_json_value(signature.get(field)))
+                    for signature in signatures
+                ]
             lines.append("| " + field + " | " + " | ".join(values) + " |")
+
+        lines.extend(["", "## Semantic topology changes", ""])
+        for index, signature in enumerate(signatures[1:], start=1):
+            changes = semantic_architecture_diff(signatures[0], signature)
+            lines.append(f"### Run {index} vs reference")
+            lines.append("")
+            if changes:
+                lines.extend(f"- {change}" for change in changes)
+                lines.append(
+                    "- checkpoint compatibility impact: structural mismatch"
+                )
+            else:
+                lines.append("- No subsystem topology change detected.")
+            lines.append("")
 
     lines.extend(["", "## Run fingerprints", ""])
     for index, record in enumerate(records):

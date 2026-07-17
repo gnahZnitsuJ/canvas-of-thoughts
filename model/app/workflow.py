@@ -198,6 +198,7 @@ def build_model_result(
     compile_profile_name="full",
     learned_init_mode="random-function",
     learned_init_seed=None,
+    architecture_name="root-context-v1",
 ):
     """Build the Python-side Nengo model without compiling a simulator."""
     compile_profile_config = resolve_compile_profile(compile_profile_name)
@@ -213,6 +214,7 @@ def build_model_result(
             learned_init_seed=learned_init_seed,
             compile_profile_name=compile_profile_config["name"],
             compile_profile_settings=compile_profile_config["settings"],
+            architecture_name=architecture_name,
         )
     timings["Model build"] = perf_counter() - start
     return model_result, compile_profile_config
@@ -326,6 +328,8 @@ def make_compile_fingerprint(
         "strict_vocab": mp.strict_vocab,
         "sub_lengths": model_result.sub_lengths,
         "sub_lengths_mode": "legacy_deferred",
+        "architecture_name": model_result.architecture_spec.name,
+        "architecture_topology": model_result.architecture_topology_signature,
         "training_semantics_version": TRAINING_SEMANTICS_VERSION,
         "probe_mode": model_result.probe_mode,
         "learned_init_mode": learned_init_mode,
@@ -356,6 +360,7 @@ def build_runtime(
     compile_profile_name="full",
     learned_init_mode="random-function",
     learned_init_seed=None,
+    architecture_name="root-context-v1",
 ):
     """Build the model, select an OpenCL device, and compile the simulator."""
     model_result, compile_profile_config = build_model_result(
@@ -365,6 +370,7 @@ def build_runtime(
         compile_profile_name=compile_profile_name,
         learned_init_mode=learned_init_mode,
         learned_init_seed=learned_init_seed,
+        architecture_name=architecture_name,
     )
 
     opencl_selection = select_opencl_device(
@@ -428,6 +434,7 @@ def print_dry_run_summary(args, workflow, training_config):
     """Report the resolved workflow plan without building the model."""
     print("\nDry run summary:\n")
     print(f"workflow:                {workflow}")
+    print(f"architecture:            {args.architecture}")
     print(f"checkpoint path:         {args.checkpoint_path}")
     print(f"compile profile:         {args.compile_profile}")
     print(f"learned init mode:       {args.learned_init_mode}")
@@ -529,6 +536,7 @@ def save_build_only_telemetry(
         "kind": "model_build_only",
         "environment": environment_telemetry(),
         "parameters": {
+            "architecture_name": model_result.architecture_spec.name,
             "sub_lengths": model_result.sub_lengths,
             "sub_lengths_mode": "legacy_deferred",
             "context_length": mp.context_length,

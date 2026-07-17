@@ -147,6 +147,38 @@ class TelemetryComparisonTests(unittest.TestCase):
         self.assertEqual(record["connection_count"], 6450)
         self.assertEqual(record["architecture_signature"], '{"vocab_dim":256}')
 
+    def test_reports_semantic_component_connection_and_role_changes(self):
+        baseline = {
+            "architecture_name": "root-context-v1",
+            "components": [
+                {"name": "predictor", "type": "context_predictor"},
+                {"name": "refiner", "type": "prediction_refiner"},
+            ],
+            "connections": [
+                {"source": "predictor.prediction", "target": "refiner.input"}
+            ],
+            "roles": {"prediction": "refiner.prediction"},
+        }
+        variant = {
+            "architecture_name": "no-refiner-v1",
+            "components": [
+                {"name": "predictor", "type": "context_predictor"}
+            ],
+            "connections": [],
+            "roles": {"prediction": "predictor.prediction"},
+        }
+
+        changes = compare_telemetry.semantic_architecture_diff(baseline, variant)
+
+        self.assertIn("component removed: refiner", changes)
+        self.assertIn(
+            "connection removed: predictor.prediction -> refiner.input", changes
+        )
+        self.assertIn(
+            "role changed: prediction (refiner.prediction -> predictor.prediction)",
+            changes,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

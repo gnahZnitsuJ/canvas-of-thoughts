@@ -38,6 +38,21 @@ class CheckpointComparisonTests(unittest.TestCase):
         self.assertEqual(categories["learned_init_mode"], "learned-init")
         self.assertIn("saved:   'full'", rendered)
 
+    def test_migrates_legacy_fixed_builder_to_identical_root_context(self):
+        saved = {"vocab_dim": 256, "num_learning_connections": 2}
+        topology = {
+            "architecture_name": "root-context-v1",
+            "checkpoint_order": ["refiner", "predictor"],
+        }
+        current = {**saved, "architecture_topology": topology}
+
+        comparison = compare_architecture_signatures(saved, current)
+        rendered = format_architecture_comparison(comparison)
+
+        self.assertTrue(comparison["matches"])
+        self.assertTrue(comparison["legacy_topology_assumed"])
+        self.assertIn("legacy root-context topology migration", rendered)
+
 
 if __name__ == "__main__":
     unittest.main()

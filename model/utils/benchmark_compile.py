@@ -1,3 +1,5 @@
+"""Compile benchmarks for full models and representative Nengo components."""
+
 import argparse
 import gc
 import sys
@@ -81,6 +83,7 @@ def compile_case(
     learned_init_seed=None,
     include_first_run_warmup=False,
     repeat_index=None,
+    architecture_name="root-context-v1",
 ):
     with representation_dimension(dimensions):
         vocab = make_vocab(dimensions)
@@ -97,6 +100,7 @@ def compile_case(
                 learned_init_seed=learned_init_seed,
                 compile_profile_name=compile_profile["name"],
                 compile_profile_settings=compile_profile["settings"],
+                architecture_name=architecture_name,
             )
         model_build_seconds = perf_counter() - start
 
@@ -130,6 +134,8 @@ def compile_case(
             "compile_profile": compile_profile,
             "learned_init_mode": learned_init_mode,
             "learned_init_seed": learned_init_seed,
+            "architecture_name": architecture_name,
+            "architecture_signature": model_result.architecture_topology_signature,
             "model_build_seconds": model_build_seconds,
             "simulator_compile_seconds": simulator_compile_seconds,
             "first_run_warmup_seconds": first_run_warmup_seconds,
@@ -220,6 +226,7 @@ def benchmark(
     learned_init_seed=None,
     repeats=2,
     include_first_run_warmup=False,
+    architecture_name="root-context-v1",
 ):
     opencl_selection = select_opencl_device(
         platform_index=platform_index,
@@ -255,6 +262,7 @@ def benchmark(
                 compile_profile_name=compile_profile_name,
                 learned_init_mode=learned_init_mode,
                 learned_init_seed=learned_init_seed,
+                architecture_name=architecture_name,
             )
             for name, sub_lengths, dimensions in scaling_cases
         ]
@@ -270,6 +278,7 @@ def benchmark(
                 compile_profile_name=compile_profile_name,
                 learned_init_mode=learned_init_mode,
                 learned_init_seed=learned_init_seed,
+                architecture_name=architecture_name,
             )
             for simulator in ("nengo", "nengo_ocl")
         ]
@@ -285,6 +294,7 @@ def benchmark(
                 compile_profile_name=compile_profile_name,
                 learned_init_mode=learned_init_mode,
                 learned_init_seed=learned_init_seed,
+                architecture_name=architecture_name,
             )
         ]
     elif mode == "repeat-current":
@@ -301,6 +311,7 @@ def benchmark(
                 learned_init_seed=learned_init_seed,
                 include_first_run_warmup=include_first_run_warmup,
                 repeat_index=repeat_index,
+                architecture_name=architecture_name,
             )
             for repeat_index in range(repeats)
         ]
@@ -346,6 +357,7 @@ def benchmark(
         "compile_profile": resolve_compile_profile(compile_profile_name),
         "learned_init_mode": learned_init_mode,
         "learned_init_seed": learned_init_seed,
+        "architecture_name": architecture_name,
         "scaling": scaling,
         "simulator_comparison": simulator_comparison,
         "component_costs": component_costs,
@@ -388,6 +400,12 @@ if __name__ == "__main__":
             "Explicit OpenCL device index within the selected platform. "
             "Defaults to CANVAS_OPENCL_DEVICE_INDEX if set, otherwise 0."
         ),
+    )
+    parser.add_argument(
+        "--architecture",
+        choices=("root-context-v1", "no-refiner-v1"),
+        default="root-context-v1",
+        help="Named architecture used by full-model benchmark cases.",
     )
     parser.add_argument(
         "--probe-mode",
@@ -438,4 +456,5 @@ if __name__ == "__main__":
         learned_init_seed=args.learned_init_seed,
         repeats=args.repeats,
         include_first_run_warmup=args.include_first_run_warmup,
+        architecture_name=args.architecture,
     )

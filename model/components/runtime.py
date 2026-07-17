@@ -1,3 +1,5 @@
+"""Runtime, checkpoint, and compatibility behavior for assembled Nengo models."""
+
 import os
 import pickle
 from datetime import datetime
@@ -71,6 +73,7 @@ def build_architecture_signature(
     compile_profile = compile_fingerprint.get("compile_profile", {})
 
     return {
+        "architecture_topology": model_result.architecture_topology_signature,
         "vocab_dim": model_vocab.dimensions,
         "strict_vocab": model_result.strict,
         "step_time": float(step_time),
@@ -97,6 +100,8 @@ def build_architecture_signature(
 
 
 def _architecture_field_category(field):
+    if field == "architecture_topology":
+        return "structural"
     if field.startswith("compile_profile_"):
         return "compile-profile"
     if field.startswith("learned_init_"):
@@ -108,6 +113,20 @@ def _architecture_field_category(field):
 
 def compare_architecture_signatures(saved, current):
     """Describe compatibility using the same signatures used by checkpoint loading."""
+    saved = dict(saved)
+    legacy_topology_assumed = False
+    current_topology = current.get("architecture_topology", {})
+    if (
+        "architecture_topology" not in saved
+        and current_topology.get("architecture_name") == "root-context-v1"
+    ):
+        # Checkpoints written before composable assembly can only originate
+        # from the former fixed root-context builder. The assembled baseline is
+        # graph-identical and preserves its explicit learned-weight order, so a
+        # one-way migration is safe when every legacy field also matches.
+        saved["architecture_topology"] = current_topology
+        legacy_topology_assumed = True
+
     fields = []
     for field in sorted(set(saved) | set(current)):
         saved_value = saved.get(field)
@@ -127,12 +146,18 @@ def compare_architecture_signatures(saved, current):
         "current": current,
         "fields": fields,
         "mismatches": [field for field in fields if not field["matches"]],
+        "legacy_topology_assumed": legacy_topology_assumed,
     }
 
 
 def format_architecture_comparison(comparison):
     """Render a field-by-field checkpoint compatibility explanation."""
     if comparison["matches"]:
+        if comparison.get("legacy_topology_assumed"):
+            return (
+                "Checkpoint architecture matches via the legacy "
+                "root-context topology migration."
+            )
         return "Checkpoint architecture matches the current signature."
 
     matching = [field["field"] for field in comparison["fields"] if field["matches"]]
@@ -194,7 +219,14 @@ class ModelRuntime:
         self.simulated_seconds += duration
 
     def _set_context_reset(self, active):
-        """Toggle reset on every active context module in the current model."""
+        """Toggle every registered reset capability, with legacy fallback."""
+        reset_handles = self.model_result.capabilities.get("resettable", [])
+        if reset_handles:
+            for reset_handle in reset_handles:
+                reset_handle.set_reset(active)
+            return
+
+        # Compatibility for model results created before capability assembly.
         value = 1.0 if active else 0.0
         for context_module in self.model_result.active_context_modules:
             context_module.reset_value = value

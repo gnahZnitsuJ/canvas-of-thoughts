@@ -163,6 +163,9 @@ Useful flags:
   with `--build-only --inspect-checkpoint`, compare checkpoint metadata against the current build signature
 - `--checkpoint-path PATH`
   choose which checkpoint file to load or write under `model/checkpoints/`
+- `--architecture root-context-v1|no-refiner-v1`
+  assemble the established baseline or the checkpoint-incompatible mechanical
+  variant that exposes the context predictor without the top-level refiner
 - `--force-retrain`
   ignore an existing checkpoint and retrain from scratch
 - `--compile-profile full|fast-solver`

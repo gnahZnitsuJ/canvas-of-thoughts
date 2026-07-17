@@ -1,4 +1,4 @@
-# reusable generic network classes that may be useful later
+"""Reusable Nengo network implementations adapted by architecture factories."""
 
 import nengo
 import nengo_spa as spa
@@ -15,8 +15,9 @@ class BaseComponent(Network):
     def __init__(
         self,
         model_vocab,
-        context_in,
-        target_in,
+        context_in=None,
+        target_in=None,
+        recall_source=None,
         probe_registry=None,
         label=None,
         seed=None,
@@ -29,13 +30,23 @@ class BaseComponent(Network):
         probe_registry = probe_registry or ProbeRegistry()
 
         with self:
-            # Allow either an input-like module (with `.node()`) or a context
-            # network exposing `.output` so the component stays reusable.
-            if hasattr(context_in, "node"):
-                self.context = context_in.node()
+            # Legacy callers may still pass concrete upstream modules. The
+            # architecture assembler instead wires directly into the semantic
+            # input endpoints exposed below, avoiding proxy nodes and preserving
+            # the existing graph size.
+            if context_in is None:
+                context_source = None
+            elif hasattr(context_in, "node"):
+                context_source = context_in.node()
             else:
-                self.context = context_in.output
-            self.target = target_in.node()
+                context_source = context_in.output
+
+            if target_in is None:
+                target_source = None
+            elif hasattr(target_in, "node"):
+                target_source = target_in.node()
+            else:
+                target_source = target_in.output
 
             # State (ensembles) for learning.
             self.pre_state = spa.State(
@@ -57,11 +68,15 @@ class BaseComponent(Network):
                 size_in=model_vocab.dimensions,
                 size_out=model_vocab.dimensions,
             )
-            nengo.Connection(self.context, self.norm_node, synapse=None)
+            self.context_input = self.norm_node
+            self.target_input = self.error.input
+            if context_source is not None:
+                nengo.Connection(context_source, self.context_input, synapse=None)
             nengo.Connection(self.norm_node, self.pre_state.input, synapse=None)
 
             # The learning signal is target minus current prediction.
-            nengo.Connection(self.target, self.error.input, synapse=None)
+            if target_source is not None:
+                nengo.Connection(target_source, self.target_input, synapse=None)
             -self.post_state >> self.error
 
             assert len(self.pre_state.all_ensembles) == 1
@@ -82,7 +97,13 @@ class BaseComponent(Network):
 
             # Suppress learning during recall mode; training toggles this on the
             # target module so the same network can switch between train/recall.
-            recall_source = target_in if hasattr(target_in, "is_recall") else context_in
+            if recall_source is None:
+                if hasattr(target_in, "is_recall"):
+                    recall_source = target_in
+                elif hasattr(context_in, "is_recall"):
+                    recall_source = context_in
+            if recall_source is None:
+                raise ValueError("BaseComponent requires a recall-control source")
             self.is_recall_node = nengo.Node(
                 lambda t: recall_source.is_recall,
                 size_out=1,
@@ -101,6 +122,11 @@ class BaseComponent(Network):
                 self.post_state.output,
                 label="post_state",
             )
+            # In assembled builds the normalization node is the public context
+            # input endpoint. Probing it retains the same instrumentation count,
+            # while reporting the signal actually consumed by the learner.
+            self.context = context_source or self.context_input
+            self.target = target_source or self.target_input
             self.p_context = probe_registry.debug(self.context, label="context")
 
             # Component prediction output.

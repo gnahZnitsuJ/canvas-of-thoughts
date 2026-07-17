@@ -10,6 +10,7 @@ BENCHMARK_MODE_MAP = {
 }
 
 DEFAULT_CALIBRATION_CANDIDATES = None
+ARCHITECTURE_CHOICES = ("root-context-v1", "no-refiner-v1")
 
 
 def _parse_int_list(value):
@@ -96,6 +97,16 @@ def parse_args():
         "--checkpoint-path",
         default="reuters_checkpoint.pkl",
         help="Checkpoint file name under model/checkpoints.",
+    )
+    parser.add_argument(
+        "--architecture",
+        choices=ARCHITECTURE_CHOICES,
+        default="root-context-v1",
+        help=(
+            "Named subsystem architecture to assemble. The no-refiner variant "
+            "is a mechanical experiment and is checkpoint-incompatible with "
+            "the root-context baseline."
+        ),
     )
     parser.add_argument(
         "--force-retrain",

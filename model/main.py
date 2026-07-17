@@ -43,6 +43,7 @@ def main():
             compile_profile_name=args.compile_profile,
             learned_init_mode=args.learned_init_mode,
             learned_init_seed=args.learned_init_seed,
+            architecture_name=args.architecture,
             repeats=args.benchmark_repeats,
             include_first_run_warmup=args.include_first_run_warmup,
         )
@@ -104,6 +105,7 @@ def main():
             compile_profile_name=args.compile_profile,
             learned_init_mode=args.learned_init_mode,
             learned_init_seed=args.learned_init_seed,
+            architecture_name=args.architecture,
         )
         build_only_fingerprint = {
             "compile_profile": {
@@ -169,6 +171,7 @@ def main():
         compile_profile_name=args.compile_profile,
         learned_init_mode=args.learned_init_mode,
         learned_init_seed=args.learned_init_seed,
+        architecture_name=args.architecture,
     )
     runtime.configure_training(
         training_mode=training_config["training_mode"],
