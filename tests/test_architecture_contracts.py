@@ -1,4 +1,5 @@
 import json
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -145,6 +146,19 @@ class ArchitectureContractTests(unittest.TestCase):
         self.assertEqual(canonical_json(first), canonical_json(second))
         json.loads(canonical_json(first))
 
+    def test_signature_tracks_component_build_order(self):
+        spec, built = self.baseline()
+        reordered = spec.copy()
+        reordered.components = dict(reversed(list(reordered.components.items())))
+
+        first = architecture_signature(spec, built)
+        second = architecture_signature(reordered, built)
+
+        self.assertNotEqual(
+            first["component_build_order"], second["component_build_order"]
+        )
+        self.assertNotEqual(canonical_json(first), canonical_json(second))
+
     def test_signature_rejects_unstable_objects(self):
         spec, built = self.baseline()
         spec.components["memory"] = type(spec.components["memory"])(
@@ -160,6 +174,23 @@ class ArchitectureContractTests(unittest.TestCase):
         spec.add("memory", "context_memory")
         with self.assertRaisesRegex(ValueError, "Duplicate"):
             spec.add("memory", "context_memory")
+
+    def test_component_registry_imports_in_clean_process(self):
+        script = "\n".join(
+            [
+                "import sys",
+                f"sys.path.insert(0, {str(MODEL_DIR)!r})",
+                "from architecture.components import default_component_registry",
+                "assert 'context_memory' in default_component_registry()",
+            ]
+        )
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
 
 
 if __name__ == "__main__":

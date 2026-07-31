@@ -371,6 +371,14 @@ def semantic_architecture_diff(reference_signature, current_signature):
                 f"role changed: {role} "
                 f"({reference_roles.get(role)} -> {current_roles.get(role)})"
             )
+    if reference.get("component_build_order", []) != current.get(
+        "component_build_order", []
+    ):
+        changes.append(
+            "component build order changed: "
+            f"{reference.get('component_build_order', [])} -> "
+            f"{current.get('component_build_order', [])}"
+        )
     if reference.get("checkpoint_order", []) != current.get("checkpoint_order", []):
         changes.append(
             "checkpoint order changed: "

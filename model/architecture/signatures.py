@@ -100,6 +100,7 @@ def architecture_signature(
     return {
         "architecture_name": spec.name,
         "architecture_schema_version": spec.schema_version,
+        "component_build_order": list(spec.components),
         "components": components,
         "connections": connections,
         "roles": dict(sorted(spec.roles.items())),

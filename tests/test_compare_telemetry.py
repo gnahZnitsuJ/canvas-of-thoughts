@@ -150,6 +150,7 @@ class TelemetryComparisonTests(unittest.TestCase):
     def test_reports_semantic_component_connection_and_role_changes(self):
         baseline = {
             "architecture_name": "root-context-v1",
+            "component_build_order": ["predictor", "refiner"],
             "components": [
                 {"name": "predictor", "type": "context_predictor"},
                 {"name": "refiner", "type": "prediction_refiner"},
@@ -161,6 +162,7 @@ class TelemetryComparisonTests(unittest.TestCase):
         }
         variant = {
             "architecture_name": "no-refiner-v1",
+            "component_build_order": ["predictor"],
             "components": [
                 {"name": "predictor", "type": "context_predictor"}
             ],
@@ -176,6 +178,11 @@ class TelemetryComparisonTests(unittest.TestCase):
         )
         self.assertIn(
             "role changed: prediction (refiner.prediction -> predictor.prediction)",
+            changes,
+        )
+        self.assertIn(
+            "component build order changed: "
+            "['predictor', 'refiner'] -> ['predictor']",
             changes,
         )
 
