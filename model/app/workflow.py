@@ -2,6 +2,7 @@
 
 import cProfile
 import os
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
@@ -13,6 +14,12 @@ from gensim.models import Word2Vec
 from nltk.corpus import reuters
 
 import components.net_comp as nc
+from app.args import resolve_workflow
+from app.shell import (
+    launch_interactive_prompt,
+    launch_runtime_shell,
+    run_demo_predictions,
+)
 from components.runtime import (
     ModelRuntime,
     TRAINING_SEMANTICS_VERSION,
@@ -25,7 +32,7 @@ from config import model_parameters as mp
 from utils import seed_vocab
 from utils.build_config import compile_profile_scope, resolve_compile_profile
 from utils.calibration import calibrate_token_duration
-from utils.eval import iter_next_token_predictions
+from utils.eval import evaluate_model
 from utils.input import make_unitary
 from utils.opencl import print_opencl_selection, select_opencl_device
 from utils.processing import WordsToSPAVocab
@@ -57,6 +64,40 @@ COMPILE_PROFILE_ENV_VARS = (
     "CANVAS_OPENCL_PLATFORM_INDEX",
     "CANVAS_OPENCL_DEVICE_INDEX",
 )
+
+
+@dataclass(frozen=True)
+class CompiledRun:
+    """Artifacts that belong to one compiled model runtime."""
+
+    runtime: object
+    model_result: object
+    opencl_selection: dict
+    compile_profile: dict
+    compile_fingerprint: dict
+
+    @property
+    def platform(self):
+        return self.opencl_selection["platform"]
+
+    @property
+    def device(self):
+        return self.opencl_selection["device"]
+
+
+@dataclass(frozen=True)
+class RunTelemetryContext:
+    """Inputs needed to describe one normal runtime execution."""
+
+    compiled: CompiledRun
+    timings: dict
+    train_test: object
+    max_examples: int
+    training_invocations_before: dict
+    training_invocations_after: dict
+    evaluation_invocations_after: dict
+    evaluation_result: object = None
+    calibration_result: object = None
 
 
 def print_timing(label, elapsed):
@@ -419,14 +460,12 @@ def build_runtime(
         learned_init_seed=learned_init_seed,
     )
     runtime.set_compile_fingerprint(compile_fingerprint)
-    return (
-        runtime,
-        model_result,
-        platform,
-        device,
-        opencl_selection,
-        compile_profile,
-        compile_fingerprint,
+    return CompiledRun(
+        runtime=runtime,
+        model_result=model_result,
+        opencl_selection=opencl_selection,
+        compile_profile=compile_profile,
+        compile_fingerprint=compile_fingerprint,
     )
 
 
@@ -571,27 +610,6 @@ def save_build_only_telemetry(
     return compile_fingerprint
 
 
-def run_demo_predictions(runtime, testing_set, max_examples, top_k):
-    """Print a small qualitative sample of streaming next-token predictions."""
-    print("\nSample predictions:\n")
-
-    demo_count = 0
-    for tokens in testing_set:
-        for result in iter_next_token_predictions(runtime, tokens, top_k=top_k):
-            prediction_text = ", ".join(
-                f"{word} ({score:.3f})"
-                for word, score in result["predictions"]
-            )
-            print(
-                f"{' '.join(result['prefix'])} -> {prediction_text} "
-                f"| target: {result['target']}"
-            )
-
-            demo_count += 1
-            if demo_count >= max_examples:
-                return
-
-
 def save_calibrated_runtime_profile(calibration_result, runtime, opencl_selection):
     """Persist a machine-local runtime profile from the latest calibration."""
     profile = default_runtime_profile()
@@ -650,36 +668,24 @@ def run_token_duration_calibration(runtime, train_test, args, opencl_selection):
     return calibration_result, profile_path
 
 
-def save_run_telemetry(
-    runtime,
-    model_result,
-    platform,
-    device,
-    opencl_selection,
-    timings,
-    train_test,
-    max_examples,
-    training_invocations_before,
-    training_invocations_after,
-    evaluation_invocations_after,
-    compile_profile,
-    compile_fingerprint,
-    evaluation_result=None,
-    calibration_result=None,
-):
+def save_run_telemetry(context):
     """Persist the telemetry payload for a normal workflow run."""
+    compiled = context.compiled
+    runtime = compiled.runtime
+    model_result = compiled.model_result
+    opencl_selection = compiled.opencl_selection
     complexity = {
         "network": network_telemetry(model_result.model),
         "operators": operator_telemetry(runtime.sim),
     }
     invocation_estimates = {
         "training": training_invocation_estimate(
-            train_test.training_set,
+            context.train_test.training_set,
             training_mode=runtime.training_mode,
         ),
         "evaluation": evaluation_invocation_estimate(
-            train_test.testing_set,
-            max_examples=max_examples,
+            context.train_test.testing_set,
+            max_examples=context.max_examples,
             evaluation_mode="streaming",
         ),
     }
@@ -688,8 +694,8 @@ def save_run_telemetry(
         "kind": "model_run",
         "environment": {
             **environment_telemetry(),
-            "opencl_platform": platform.name,
-            "opencl_device": device.name,
+            "opencl_platform": compiled.platform.name,
+            "opencl_device": compiled.device.name,
             "opencl_platform_index": opencl_selection["platform_index"],
             "opencl_device_index": opencl_selection["device_index"],
         },
@@ -710,70 +716,248 @@ def save_run_telemetry(
             "created_labels": model_result.created_probe_labels,
             "skipped_labels": model_result.skipped_probe_labels,
         },
-        "timings_seconds": timings,
-        "compile_profile": compile_profile,
-        "compile_fingerprint": compile_fingerprint,
+        "timings_seconds": context.timings,
+        "compile_profile": compiled.compile_profile,
+        "compile_fingerprint": compiled.compile_fingerprint,
         "complexity": complexity,
         "invocation_estimates": invocation_estimates,
         "actual_simulator_invocations": {
             "training": invocation_delta(
-                training_invocations_after,
-                training_invocations_before,
+                context.training_invocations_after,
+                context.training_invocations_before,
             ),
             "evaluation": invocation_delta(
-                evaluation_invocations_after,
-                training_invocations_after,
+                context.evaluation_invocations_after,
+                context.training_invocations_after,
             ),
-            "total": evaluation_invocations_after,
+            "total": context.evaluation_invocations_after,
         },
     }
-    if evaluation_result is not None:
-        payload["evaluation"] = evaluation_result
-    if calibration_result is not None:
-        payload["calibration"] = calibration_result
+    if context.evaluation_result is not None:
+        payload["evaluation"] = context.evaluation_result
+    if context.calibration_result is not None:
+        payload["calibration"] = context.calibration_result
 
     telemetry_path = save_telemetry(RESULTS_DIR, payload)
     print(f"\nSaved run telemetry to: {telemetry_path}")
 
 
-def maybe_save_run_telemetry(
-    telemetry_enabled,
-    runtime,
-    model_result,
-    platform,
-    device,
-    opencl_selection,
-    timings,
-    train_test,
-    max_examples,
-    training_invocations_before,
-    training_invocations_after,
-    evaluation_invocations_after,
-    compile_profile,
-    compile_fingerprint,
-    evaluation_result=None,
-    calibration_result=None,
-):
-    """Honor the telemetry toggle while keeping the call site in main.py simple."""
+def maybe_save_run_telemetry(telemetry_enabled, context):
+    """Honor the telemetry toggle at the application workflow boundary."""
     if not telemetry_enabled:
         print("\nTelemetry recording disabled for this run.")
         return
 
-    save_run_telemetry(
-        runtime,
-        model_result,
-        platform,
-        device,
-        opencl_selection,
+    save_run_telemetry(context)
+
+
+def run_application(args):
+    """Execute a resolved non-benchmark CLI workflow."""
+    workflow_plan = resolve_workflow(args)
+    timings = {}
+
+    runtime_profile = load_requested_runtime_profile(args.use_runtime_profile)
+    training_config = resolve_training_configuration(args, runtime_profile)
+
+    if args.calibrate_token_duration:
+        if training_config["training_mode"] != "scheduled":
+            raise ValueError(
+                "--calibrate-token-duration currently requires --train-mode scheduled"
+            )
+        if not workflow_plan["train"] or not args.force_retrain:
+            raise ValueError(
+                "--calibrate-token-duration requires an actual retraining run; "
+                "use it with --train and --force-retrain"
+            )
+
+    if args.dry_run:
+        print_dry_run_summary(args, workflow_plan, training_config)
+        return
+
+    checkpoint_metadata = None
+    if args.inspect_checkpoint:
+        try:
+            checkpoint_metadata_path, checkpoint_metadata = load_checkpoint_metadata(
+                args.checkpoint_path
+            )
+        except FileNotFoundError:
+            if not args.build_only:
+                raise
+            print(
+                f"\nCheckpoint inspection skipped: "
+                f"{args.checkpoint_path} does not exist yet."
+            )
+        else:
+            print_checkpoint_metadata(
+                args.checkpoint_path,
+                checkpoint_metadata_path,
+                checkpoint_metadata,
+            )
+            if not args.build_only:
+                return
+
+    seed_vocab_model = load_seed_vocab_model()
+    train_test = build_train_test(timings)
+    model_vocab = build_model_vocab(seed_vocab_model, train_test.vocab, timings)
+
+    if args.build_only:
+        model_result, compile_profile_config = build_model_result(
+            model_vocab,
+            timings,
+            probe_mode=args.probe_mode,
+            compile_profile_name=args.compile_profile,
+            learned_init_mode=args.learned_init_mode,
+            learned_init_seed=args.learned_init_seed,
+            architecture_name=args.architecture,
+        )
+        build_only_fingerprint = {
+            "compile_profile": {
+                "name": compile_profile_config["name"],
+                "settings": compile_profile_config["settings"],
+                "first_run_warmup_enabled": False,
+                "profile_compile_enabled": False,
+            },
+            "learned_init_mode": args.learned_init_mode,
+            "learned_init_seed": args.learned_init_seed,
+        }
+        comparison = (
+            compare_architecture_to_checkpoint(
+                model_result,
+                model_vocab,
+                training_config["step_time"],
+                build_only_fingerprint,
+                checkpoint_metadata,
+            )
+            if checkpoint_metadata is not None and args.compare_current_architecture
+            else None
+        )
+        if not args.no_telemetry:
+            save_build_only_telemetry(
+                model_result,
+                model_vocab,
+                timings,
+                training_config,
+                compile_profile_name=compile_profile_config["name"],
+                compile_profile_settings=compile_profile_config["settings"],
+                learned_init_mode=args.learned_init_mode,
+                learned_init_seed=args.learned_init_seed,
+                checkpoint_comparison=comparison,
+            )
+        else:
+            print("\nTelemetry recording disabled for this build-only run.")
+
+        if checkpoint_metadata is not None and args.compare_current_architecture:
+            print_architecture_comparison(comparison)
+
+        print("\nRun timings:\n")
+        for label, elapsed in timings.items():
+            print_timing(label, elapsed)
+        return
+
+    compiled = build_runtime(
+        model_vocab,
         timings,
-        train_test,
-        max_examples,
-        training_invocations_before,
-        training_invocations_after,
-        evaluation_invocations_after,
-        compile_profile,
-        compile_fingerprint,
+        opencl_platform_index=args.opencl_platform_index,
+        opencl_device_index=args.opencl_device_index,
+        step_time=training_config["step_time"],
+        first_run_warmup=args.first_run_warmup,
+        profile_compile=args.profile_compile,
+        probe_mode=args.probe_mode,
+        compile_profile_name=args.compile_profile,
+        learned_init_mode=args.learned_init_mode,
+        learned_init_seed=args.learned_init_seed,
+        architecture_name=args.architecture,
+    )
+    runtime = compiled.runtime
+    runtime.configure_training(
+        training_mode=training_config["training_mode"],
+        token_duration=training_config["token_duration"],
+        token_duration_source=training_config["token_duration_source"],
+    )
+
+    calibration_result = None
+    if args.calibrate_token_duration:
+        start = perf_counter()
+        calibration_result, _profile_path = run_token_duration_calibration(
+            runtime,
+            train_test,
+            args,
+            compiled.opencl_selection,
+        )
+        timings["Calibration"] = perf_counter() - start
+
+    training_invocations_before = runtime.simulator_invocation_telemetry()
+    training_invocations_after = training_invocations_before
+
+    if workflow_plan["train"]:
+        start = perf_counter()
+        runtime.train_or_load(
+            train_test.training_set,
+            checkpoint_path=args.checkpoint_path,
+            force_retrain=args.force_retrain,
+        )
+        timings["Training"] = perf_counter() - start
+        training_invocations_after = runtime.simulator_invocation_telemetry()
+    elif any(
+        workflow_plan[stage]
+        for stage in ("eval", "demo", "interactive", "shell")
+    ):
+        runtime.load_checkpoint(args.checkpoint_path)
+
+    evaluation_result = None
+    evaluation_invocations_after = training_invocations_after
+    if workflow_plan["eval"]:
+        start = perf_counter()
+        evaluation_result = evaluate_model(
+            runtime,
+            train_test.testing_set,
+            max_examples=args.max_examples,
+            top_k=args.top_k,
+        )
+        timings["Evaluation"] = perf_counter() - start
+        evaluation_invocations_after = runtime.simulator_invocation_telemetry()
+
+    print("\nRun timings:\n")
+    for label, elapsed in timings.items():
+        print_timing(label, elapsed)
+
+    telemetry_context = RunTelemetryContext(
+        compiled=compiled,
+        timings=timings,
+        train_test=train_test,
+        max_examples=args.max_examples,
+        training_invocations_before=training_invocations_before,
+        training_invocations_after=training_invocations_after,
+        evaluation_invocations_after=evaluation_invocations_after,
         evaluation_result=evaluation_result,
         calibration_result=calibration_result,
     )
+    maybe_save_run_telemetry(not args.no_telemetry, telemetry_context)
+
+    if workflow_plan["demo"]:
+        run_demo_predictions(
+            runtime,
+            train_test.testing_set,
+            max_examples=args.max_demo_examples,
+            top_k=args.top_k,
+        )
+
+    if workflow_plan["interactive"]:
+        launch_interactive_prompt(
+            runtime,
+            top_k=args.top_k,
+            generate=args.generate,
+            max_tokens=args.max_tokens,
+        )
+
+    if workflow_plan["shell"]:
+        launch_runtime_shell(
+            runtime,
+            train_test.testing_set,
+            args.checkpoint_path,
+            top_k=args.top_k,
+            max_tokens=args.max_tokens,
+            max_examples=args.max_examples,
+            max_demo_examples=args.max_demo_examples,
+        )
 

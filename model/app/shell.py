@@ -2,8 +2,28 @@
 
 from time import perf_counter
 
-from app.workflow import run_demo_predictions
-from utils.eval import evaluate_model
+from utils.eval import evaluate_model, iter_next_token_predictions
+
+
+def run_demo_predictions(runtime, testing_set, max_examples, top_k):
+    """Print a small qualitative sample of streaming next-token predictions."""
+    print("\nSample predictions:\n")
+
+    demo_count = 0
+    for tokens in testing_set:
+        for result in iter_next_token_predictions(runtime, tokens, top_k=top_k):
+            prediction_text = ", ".join(
+                f"{word} ({score:.3f})"
+                for word, score in result["predictions"]
+            )
+            print(
+                f"{' '.join(result['prefix'])} -> {prediction_text} "
+                f"| target: {result['target']}"
+            )
+
+            demo_count += 1
+            if demo_count >= max_examples:
+                return
 
 
 def _print_predictions(predictions):
