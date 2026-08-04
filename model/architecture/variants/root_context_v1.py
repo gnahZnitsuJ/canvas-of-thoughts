@@ -32,3 +32,7 @@ def root_context_v1():
     # Preserve the fixed builder's historical checkpoint weight order.
     spec.set_checkpoint_order("refiner", "predictor")
     return spec
+
+
+ARCHITECTURE_BUILDER = root_context_v1
+ARCHITECTURE_DEFAULT = True

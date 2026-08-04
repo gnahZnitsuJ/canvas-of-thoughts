@@ -4,6 +4,7 @@ import nengo
 
 
 VALID_PROBE_MODES = ("minimal", "debug")
+DEFAULT_PROBE_MODE = "debug"
 
 
 class ProbeRegistry:
@@ -14,7 +15,7 @@ class ProbeRegistry:
     instrumentation surface for a run.
     """
 
-    def __init__(self, mode="debug"):
+    def __init__(self, mode=DEFAULT_PROBE_MODE):
         if mode not in VALID_PROBE_MODES:
             raise ValueError(f"Unknown probe mode: {mode}")
 

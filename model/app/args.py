@@ -2,6 +2,17 @@
 
 import argparse
 
+from architecture.variants import DEFAULT_ARCHITECTURE_NAME, available_architectures
+from components.runtime import DEFAULT_TRAINING_MODE, VALID_TRAINING_MODES
+from utils.build_config import (
+    DEFAULT_COMPILE_PROFILE_NAME,
+    DEFAULT_LEARNED_INIT_MODE,
+    LEARNED_INIT_MODES,
+    available_compile_profiles,
+    validate_learned_init_configuration,
+)
+from utils.probes import DEFAULT_PROBE_MODE, VALID_PROBE_MODES
+
 BENCHMARK_MODE_MAP = {
     "compile-current": "current",
     "compile-components": "components",
@@ -10,7 +21,10 @@ BENCHMARK_MODE_MAP = {
 }
 
 DEFAULT_CALIBRATION_CANDIDATES = None
-ARCHITECTURE_CHOICES = ("root-context-v1", "no-refiner-v1")
+TRAINING_MODE_CHOICES = tuple(
+    mode.replace("_", "-") for mode in VALID_TRAINING_MODES
+)
+DEFAULT_TRAINING_MODE_CHOICE = DEFAULT_TRAINING_MODE.replace("_", "-")
 
 
 def _parse_int_list(value):
@@ -100,12 +114,11 @@ def parse_args():
     )
     parser.add_argument(
         "--architecture",
-        choices=ARCHITECTURE_CHOICES,
-        default="root-context-v1",
+        choices=available_architectures(),
+        default=DEFAULT_ARCHITECTURE_NAME,
         help=(
-            "Named subsystem architecture to assemble. The no-refiner variant "
-            "is a mechanical experiment and is checkpoint-incompatible with "
-            "the root-context baseline."
+            "Named subsystem architecture to assemble. Architecture changes "
+            "may be checkpoint-incompatible with the default baseline."
         ),
     )
     parser.add_argument(
@@ -115,8 +128,8 @@ def parse_args():
     )
     parser.add_argument(
         "--train-mode",
-        choices=["single-pass", "scheduled"],
-        default="single-pass",
+        choices=TRAINING_MODE_CHOICES,
+        default=DEFAULT_TRAINING_MODE_CHOICE,
         help="Training driver for corpus training.",
     )
     parser.add_argument(
@@ -167,8 +180,8 @@ def parse_args():
     )
     parser.add_argument(
         "--compile-profile",
-        choices=["full", "fast-solver"],
-        default="full",
+        choices=available_compile_profiles(),
+        default=DEFAULT_COMPILE_PROFILE_NAME,
         help=(
             "Compile-time build profile. 'fast-solver' lowers ensemble eval-point "
             "counts during build without changing the architecture layout."
@@ -176,8 +189,8 @@ def parse_args():
     )
     parser.add_argument(
         "--learned-init-mode",
-        choices=["random-function", "zero-nosolver", "seeded-nosolver"],
-        default="random-function",
+        choices=LEARNED_INIT_MODES,
+        default=DEFAULT_LEARNED_INIT_MODE,
         help=(
             "Initialization strategy for PES-learned decoded connections. "
             "'random-function' preserves the current behavior."
@@ -190,8 +203,8 @@ def parse_args():
     )
     parser.add_argument(
         "--probe-mode",
-        choices=["minimal", "debug"],
-        default="debug",
+        choices=VALID_PROBE_MODES,
+        default=DEFAULT_PROBE_MODE,
         help=(
             "Instrumentation surface for model probes. "
             "'minimal' keeps only required probes, while 'debug' keeps the "
@@ -279,8 +292,13 @@ def parse_args():
             "the current architecture can be compared without simulator compile."
         )
 
-    if args.learned_init_mode == "seeded-nosolver" and args.learned_init_seed is None:
-        parser.error("--learned-init-mode seeded-nosolver requires --learned-init-seed.")
+    try:
+        validate_learned_init_configuration(
+            args.learned_init_mode,
+            args.learned_init_seed,
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
 
     if args.benchmark_repeats < 1:
         parser.error("--benchmark-repeats must be at least 1.")

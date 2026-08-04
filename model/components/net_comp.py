@@ -3,9 +3,10 @@
 from architecture.assembly import AssembledModelResult, assemble_architecture
 from architecture.components import default_component_registry
 from architecture.contracts import ArchitectureBuildContext
-from architecture.variants import architecture_spec
+from architecture.variants import DEFAULT_ARCHITECTURE_NAME, architecture_spec
 from config import model_parameters as mp
-from utils.probes import ProbeRegistry
+from utils.build_config import DEFAULT_COMPILE_PROFILE_NAME, DEFAULT_LEARNED_INIT_MODE
+from utils.probes import DEFAULT_PROBE_MODE, ProbeRegistry
 
 
 # Preserve the historical public name for callers that import ModelResult.
@@ -16,12 +17,12 @@ def Model(
     sub_lengths,
     model_vocab,
     strict=mp.strict_vocab,
-    probe_mode="debug",
-    learned_init_mode="random-function",
+    probe_mode=DEFAULT_PROBE_MODE,
+    learned_init_mode=DEFAULT_LEARNED_INIT_MODE,
     learned_init_seed=None,
-    compile_profile_name="full",
+    compile_profile_name=DEFAULT_COMPILE_PROFILE_NAME,
     compile_profile_settings=None,
-    architecture_name="root-context-v1",
+    architecture_name=DEFAULT_ARCHITECTURE_NAME,
 ):
     """Assemble one validated architecture behind the legacy model facade.
 

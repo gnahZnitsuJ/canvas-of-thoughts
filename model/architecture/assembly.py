@@ -195,6 +195,8 @@ def assemble_architecture(
         sub_lengths=sub_lengths,
         learned_init_mode=context.learned_init_mode,
         learned_init_seed=context.learned_init_seed,
+        # Preserve the historical profile label for legacy build contexts that
+        # predate explicit compile-profile selection.
         compile_profile_name=str(context.compile_profile.get("name", "full")),
         compile_profile_settings=dict(context.compile_profile.get("settings", {})),
         probe_mode=context.probe_registry.mode,

@@ -14,6 +14,7 @@ from gensim.models import Word2Vec
 from nltk.corpus import reuters
 
 import components.net_comp as nc
+from architecture.variants import DEFAULT_ARCHITECTURE_NAME
 from app.args import resolve_workflow
 from app.shell import (
     launch_interactive_prompt,
@@ -30,11 +31,17 @@ from components.runtime import (
 )
 from config import model_parameters as mp
 from utils import seed_vocab
-from utils.build_config import compile_profile_scope, resolve_compile_profile
+from utils.build_config import (
+    DEFAULT_COMPILE_PROFILE_NAME,
+    DEFAULT_LEARNED_INIT_MODE,
+    compile_profile_scope,
+    resolve_compile_profile,
+)
 from utils.calibration import calibrate_token_duration
 from utils.eval import evaluate_model
 from utils.input import make_unitary
 from utils.opencl import print_opencl_selection, select_opencl_device
+from utils.probes import DEFAULT_PROBE_MODE
 from utils.processing import WordsToSPAVocab
 from utils.runtime_profile import (
     default_runtime_profile,
@@ -235,11 +242,11 @@ def build_model_result(
     model_vocab,
     timings,
     *,
-    probe_mode="debug",
-    compile_profile_name="full",
-    learned_init_mode="random-function",
+    probe_mode=DEFAULT_PROBE_MODE,
+    compile_profile_name=DEFAULT_COMPILE_PROFILE_NAME,
+    learned_init_mode=DEFAULT_LEARNED_INIT_MODE,
     learned_init_seed=None,
-    architecture_name="root-context-v1",
+    architecture_name=DEFAULT_ARCHITECTURE_NAME,
 ):
     """Build the Python-side Nengo model without compiling a simulator."""
     compile_profile_config = resolve_compile_profile(compile_profile_name)
@@ -318,7 +325,7 @@ def make_compile_profile(
     profile_output_path,
     platform=None,
     device=None,
-    compile_profile_name="full",
+    compile_profile_name=DEFAULT_COMPILE_PROFILE_NAME,
     compile_profile_settings=None,
 ):
     """Assemble the compile-phase telemetry block for normal workflow runs."""
@@ -347,7 +354,7 @@ def make_compile_fingerprint(
     compile_profile,
     *,
     opencl_selection=None,
-    learned_init_mode="random-function",
+    learned_init_mode=DEFAULT_LEARNED_INIT_MODE,
     learned_init_seed=None,
 ):
     """Record the configuration that produced a compile result.
@@ -397,11 +404,11 @@ def build_runtime(
     step_time=DEFAULT_STEP_TIME,
     first_run_warmup=False,
     profile_compile=False,
-    probe_mode="debug",
-    compile_profile_name="full",
-    learned_init_mode="random-function",
+    probe_mode=DEFAULT_PROBE_MODE,
+    compile_profile_name=DEFAULT_COMPILE_PROFILE_NAME,
+    learned_init_mode=DEFAULT_LEARNED_INIT_MODE,
     learned_init_seed=None,
-    architecture_name="root-context-v1",
+    architecture_name=DEFAULT_ARCHITECTURE_NAME,
 ):
     """Build the model, select an OpenCL device, and compile the simulator."""
     model_result, compile_profile_config = build_model_result(

@@ -16,6 +16,26 @@ COMPILE_PROFILE_SETTINGS = {
         "ensemble_n_eval_points": 100,
     },
 }
+DEFAULT_COMPILE_PROFILE_NAME = "full"
+LEARNED_INIT_MODES = (
+    "random-function",
+    "zero-nosolver",
+    "seeded-nosolver",
+)
+DEFAULT_LEARNED_INIT_MODE = "random-function"
+
+
+def available_compile_profiles():
+    """Return sorted build-profile names accepted by the profile resolver."""
+    return tuple(sorted(COMPILE_PROFILE_SETTINGS))
+
+
+def validate_learned_init_configuration(init_mode, init_seed):
+    """Validate a learned-connection initialization mode and its optional seed."""
+    if init_mode not in LEARNED_INIT_MODES:
+        raise ValueError(f"Unknown learned init mode: {init_mode}")
+    if init_mode == "seeded-nosolver" and init_seed is None:
+        raise ValueError("seeded-nosolver requires an explicit learned-init seed")
 
 
 def resolve_compile_profile(name):
@@ -69,7 +89,7 @@ def make_learned_connection(
     *,
     dimensions,
     learning_rate,
-    init_mode="random-function",
+    init_mode=DEFAULT_LEARNED_INIT_MODE,
     init_seed=None,
 ):
     """Create one PES connection using the requested initialization strategy.
@@ -79,6 +99,8 @@ def make_learned_connection(
     in explicit decoder initialization so compile experiments can separate
     solver cost from architecture cost.
     """
+    validate_learned_init_configuration(init_mode, init_seed)
+
     if init_mode == "random-function":
         return nengo.Connection(
             pre_obj,
@@ -95,7 +117,7 @@ def make_learned_connection(
             weights=False,
         )
     else:
-        raise ValueError(f"Unknown learned init mode: {init_mode}")
+        raise AssertionError(f"Unhandled learned init mode: {init_mode}")
 
     return nengo.Connection(
         pre_obj,

@@ -12,6 +12,8 @@ from utils.processing import SPAVocabToWords, WordsToSPAVocab
 
 
 TRAINING_SEMANTICS_VERSION = "root_context_single_pass_v1"
+VALID_TRAINING_MODES = ("single_pass", "scheduled")
+DEFAULT_TRAINING_MODE = "single_pass"
 
 
 def resolve_checkpoint_path(filename):
@@ -205,7 +207,7 @@ class ModelRuntime:
         self.present_calls = 0
         self.reset_context_calls = 0
 
-        self.training_mode = "single_pass"
+        self.training_mode = DEFAULT_TRAINING_MODE
         self.token_duration = self.step_time
         self.token_duration_source = "default"
         self.scheduled_training_enabled = False
@@ -243,12 +245,12 @@ class ModelRuntime:
 
     def configure_training(
         self,
-        training_mode="single_pass",
+        training_mode=DEFAULT_TRAINING_MODE,
         token_duration=None,
         token_duration_source="default",
     ):
         """Set how corpus training should drive the simulator."""
-        if training_mode not in ("single_pass", "scheduled"):
+        if training_mode not in VALID_TRAINING_MODES:
             raise ValueError(f"Unknown training mode: {training_mode}")
 
         if token_duration is None:

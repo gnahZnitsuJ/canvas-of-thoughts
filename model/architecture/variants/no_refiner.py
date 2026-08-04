@@ -10,3 +10,6 @@ def no_refiner_v1():
     spec.replace("targets", "target_source", output_count=1)
     spec.assign_role("prediction", "predictor.prediction")
     return spec
+
+
+ARCHITECTURE_BUILDER = no_refiner_v1

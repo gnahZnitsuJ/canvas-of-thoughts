@@ -20,10 +20,20 @@ import numpy as np
 
 import components.net_comp as nc
 import components.net_classes as ncls
+from architecture.variants import DEFAULT_ARCHITECTURE_NAME, available_architectures
 from config import model_parameters as mp
-from utils.build_config import compile_profile_scope, resolve_compile_profile
+from utils.build_config import (
+    DEFAULT_COMPILE_PROFILE_NAME,
+    DEFAULT_LEARNED_INIT_MODE,
+    LEARNED_INIT_MODES,
+    available_compile_profiles,
+    compile_profile_scope,
+    resolve_compile_profile,
+    validate_learned_init_configuration,
+)
 from utils.input import InputModule
 from utils.opencl import print_opencl_selection, select_opencl_device
+from utils.probes import DEFAULT_PROBE_MODE, VALID_PROBE_MODES
 from utils.telemetry import (
     environment_telemetry,
     network_telemetry,
@@ -36,6 +46,7 @@ from utils.telemetry import (
 
 
 RESULTS_DIR = MODEL_DIR / "results"
+BENCHMARK_MODES = ("full", "components", "current", "repeat-current")
 
 
 @contextmanager
@@ -78,12 +89,12 @@ def compile_case(
     context,
     probe_mode,
     *,
-    compile_profile_name="full",
-    learned_init_mode="random-function",
+    compile_profile_name=DEFAULT_COMPILE_PROFILE_NAME,
+    learned_init_mode=DEFAULT_LEARNED_INIT_MODE,
     learned_init_seed=None,
     include_first_run_warmup=False,
     repeat_index=None,
-    architecture_name="root-context-v1",
+    architecture_name=DEFAULT_ARCHITECTURE_NAME,
 ):
     with representation_dimension(dimensions):
         vocab = make_vocab(dimensions)
@@ -162,7 +173,7 @@ def component_case(
     simulator_name,
     context,
     *,
-    compile_profile_name="full",
+    compile_profile_name=DEFAULT_COMPILE_PROFILE_NAME,
 ):
     with representation_dimension(dimensions):
         vocab = make_vocab(dimensions)
@@ -200,7 +211,7 @@ def component_case(
 def build_base_component(
     vocab,
     *,
-    learned_init_mode="random-function",
+    learned_init_mode=DEFAULT_LEARNED_INIT_MODE,
     learned_init_seed=None,
 ):
     with spa.Network(seed=mp.seed) as network:
@@ -220,14 +231,17 @@ def benchmark(
     mode,
     platform_index=None,
     device_index=None,
-    probe_mode="debug",
-    compile_profile_name="full",
-    learned_init_mode="random-function",
+    probe_mode=DEFAULT_PROBE_MODE,
+    compile_profile_name=DEFAULT_COMPILE_PROFILE_NAME,
+    learned_init_mode=DEFAULT_LEARNED_INIT_MODE,
     learned_init_seed=None,
     repeats=2,
     include_first_run_warmup=False,
-    architecture_name="root-context-v1",
+    architecture_name=DEFAULT_ARCHITECTURE_NAME,
 ):
+    if mode not in BENCHMARK_MODES:
+        raise ValueError(f"Unknown benchmark mode: {mode}")
+
     opencl_selection = select_opencl_device(
         platform_index=platform_index,
         device_index=device_index,
@@ -382,7 +396,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--mode",
-        choices=("full", "components", "current", "repeat-current"),
+        choices=BENCHMARK_MODES,
         default="full",
     )
     parser.add_argument(
@@ -403,26 +417,26 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--architecture",
-        choices=("root-context-v1", "no-refiner-v1"),
-        default="root-context-v1",
+        choices=available_architectures(),
+        default=DEFAULT_ARCHITECTURE_NAME,
         help="Named architecture used by full-model benchmark cases.",
     )
     parser.add_argument(
         "--probe-mode",
-        choices=("minimal", "debug"),
-        default="debug",
+        choices=VALID_PROBE_MODES,
+        default=DEFAULT_PROBE_MODE,
         help="Instrumentation surface to use while building benchmark cases.",
     )
     parser.add_argument(
         "--compile-profile",
-        choices=("full", "fast-solver"),
-        default="full",
+        choices=available_compile_profiles(),
+        default=DEFAULT_COMPILE_PROFILE_NAME,
         help="Build profile to use during benchmark model construction.",
     )
     parser.add_argument(
         "--learned-init-mode",
-        choices=("random-function", "zero-nosolver", "seeded-nosolver"),
-        default="random-function",
+        choices=LEARNED_INIT_MODES,
+        default=DEFAULT_LEARNED_INIT_MODE,
         help="Initialization strategy for PES-learned connections in benchmark runs.",
     )
     parser.add_argument(
@@ -442,8 +456,13 @@ if __name__ == "__main__":
         help="Run one post-compile warmup step per repeat and record it.",
     )
     args = parser.parse_args()
-    if args.learned_init_mode == "seeded-nosolver" and args.learned_init_seed is None:
-        parser.error("--learned-init-mode seeded-nosolver requires --learned-init-seed.")
+    try:
+        validate_learned_init_configuration(
+            args.learned_init_mode,
+            args.learned_init_seed,
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
     if args.repeats < 1:
         parser.error("--repeats must be at least 1.")
     benchmark(
