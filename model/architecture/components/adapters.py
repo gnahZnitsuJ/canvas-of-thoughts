@@ -7,7 +7,7 @@ import nengo_spa as spa
 import components.net_classes as ncls
 from architecture.contracts import BuiltComponent, Port
 from architecture.registry import ComponentRegistry
-from config import model_parameters as mp
+from config import model_defaults
 from utils.build_config import make_learned_connection
 from utils.input import InputModule
 
@@ -146,7 +146,7 @@ def build_context_predictor(ctx, spec, built_components):
         },
         signature={
             "type": "context_predictor",
-            "learning_rate": mp.model_lr * 0.5,
+            "learning_rate": model_defaults.PES_LEARNING_RATE * 0.5,
             "learned_init_seed_offset": seed_offset,
         },
     )
@@ -175,7 +175,7 @@ def build_prediction_refiner(ctx, spec, built_components):
         pre_state.all_ensembles[0],
         post_state.all_ensembles[0],
         dimensions=ctx.dimensions,
-        learning_rate=mp.model_lr * 0.5,
+        learning_rate=model_defaults.PES_LEARNING_RATE * 0.5,
         init_mode=ctx.learned_init_mode,
         init_seed=ctx.learned_init_seed,
     )
@@ -204,7 +204,7 @@ def build_prediction_refiner(ctx, spec, built_components):
         probes={"error": p_error, "post_state": p_post_state},
         signature={
             "type": "prediction_refiner",
-            "learning_rate": mp.model_lr * 0.5,
+            "learning_rate": model_defaults.PES_LEARNING_RATE * 0.5,
         },
     )
 

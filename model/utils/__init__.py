@@ -1,5 +1,8 @@
-# utils/__init__.py
-# This file marks the utils directory as a Python package.
+"""Utility package with deliberately lazy submodule imports.
+
+Callers should import the utility they use. Eagerly importing every utility made
+lightweight helpers such as runtime-profile loading require the full Nengo stack.
+"""
 
 __all__ = [
     "processing",
@@ -10,10 +13,3 @@ __all__ = [
     "calibration",
     "runtime_profile",
 ]
-
-from . import calibration
-from . import input
-from . import processing
-from . import runtime_profile
-from . import seed_vocab
-from . import train_partition

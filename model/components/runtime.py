@@ -8,6 +8,7 @@ from time import perf_counter
 import numpy as np
 from tqdm import tqdm
 
+from config.runtime_defaults import DEFAULT_STEP_TIME_SECONDS
 from utils.processing import SPAVocabToWords, WordsToSPAVocab
 
 
@@ -184,7 +185,13 @@ def format_architecture_comparison(comparison):
 class ModelRuntime:
     """Run training, recall, checkpoint, and calibration workflows."""
 
-    def __init__(self, model_result, sim, model_vocab, step_time=0.02):
+    def __init__(
+        self,
+        model_result,
+        sim,
+        model_vocab,
+        step_time=DEFAULT_STEP_TIME_SECONDS,
+    ):
         self.model_result = model_result
         self.model = model_result.model
         self.sim = sim

@@ -1,6 +1,7 @@
-# config/__init__.py
-# This file marks the config directory as a Python package.
+"""Committed defaults grouped by their change and compatibility domain.
 
-__all__ = ["model_parameters"]
+Import the owning module directly instead of relying on package-level re-exports;
+this keeps dependencies on model, data, and runtime policy visible at call sites.
+"""
 
-from . import model_parameters
+__all__ = ["data_defaults", "model_defaults", "runtime_defaults"]

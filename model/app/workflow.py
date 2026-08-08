@@ -29,7 +29,8 @@ from components.runtime import (
     format_architecture_comparison,
     inspect_checkpoint_metadata,
 )
-from config import model_parameters as mp
+from config import data_defaults, model_defaults
+from config.runtime_defaults import DEFAULT_STEP_TIME_SECONDS
 from utils import seed_vocab
 from utils.build_config import (
     DEFAULT_COMPILE_PROFILE_NAME,
@@ -61,8 +62,8 @@ from utils.train_partition import multiple_data_partition
 BASE_DIR = Path(__file__).resolve().parent.parent
 RESULTS_DIR = BASE_DIR / "results"
 SEED_VOCAB_PATH = BASE_DIR / "utils" / "seed_vocab.model"
-DATASETS = [reuters]
-DEFAULT_STEP_TIME = 0.02
+DATASET_REGISTRY = {"reuters": reuters}
+DATASETS = tuple(DATASET_REGISTRY[name] for name in data_defaults.DATASET_NAMES)
 COMPILE_PROFILE_ENV_VARS = (
     "PYOPENCL_NO_CACHE",
     "PYOPENCL_COMPILER_OUTPUT",
@@ -125,7 +126,7 @@ def load_seed_vocab_model():
 
     print("seed_vocab.model does NOT exist.")
     print("Generating seed vocabulary model...")
-    seed_vocab.generate_seed_vocab(DATASETS)
+    seed_vocab.generate_seed_vocab(DATASETS, output_path=SEED_VOCAB_PATH)
 
     if not SEED_VOCAB_PATH.is_file():
         raise FileNotFoundError(f"Failed to generate {SEED_VOCAB_PATH}")
@@ -138,9 +139,9 @@ def build_train_test(timings):
     start = perf_counter()
     train_test = multiple_data_partition(
         DATASETS,
-        training_restriction=mp.training_restriction,
-        testing_restriction=mp.testing_restriction,
-        strict=mp.strict_vocab,
+        training_restriction=data_defaults.TRAINING_DOCUMENT_LIMIT,
+        testing_restriction=data_defaults.TESTING_DOCUMENT_LIMIT,
+        strict=data_defaults.STRICT_VOCAB,
     )
     timings["Data partition"] = perf_counter() - start
     return train_test
@@ -150,35 +151,38 @@ def build_model_vocab(seed_vocab_model, vocab, timings):
     """Construct the SPA vocabulary used by the Nengo model for this run."""
     spa_vocab = WordsToSPAVocab(vocab)
 
-    if not mp.strict_vocab:
+    if not data_defaults.STRICT_VOCAB:
         seed_vocab_vectors = {
             token: seed_vocab_model.wv.get_vector(token)
             for token in spa_vocab
-            if token != mp.pad_token
+            if token != data_defaults.PAD_TOKEN
         }
     else:
         seed_vocab_vectors = {
             token: seed_vocab_model.wv.get_vector(token)
             for token in spa_vocab
-            if token not in (mp.pad_token, mp.unknown_token)
+            if token not in (data_defaults.PAD_TOKEN, data_defaults.UNKNOWN_TOKEN)
         }
 
     # Seed the runtime vocabulary from the Word2Vec model, then add the
     # special vectors the architecture expects explicitly.
     start = perf_counter()
     model_vocab = spa.Vocabulary(
-        dimensions=mp.rep_vocab_dim,
-        strict=mp.strict_vocab,
+        dimensions=model_defaults.VOCAB_DIMENSIONS,
+        strict=data_defaults.STRICT_VOCAB,
         pointer_gen=None,
-        max_similarity=mp.rep_vocab_max_sim,
+        max_similarity=model_defaults.VOCAB_MAX_SIMILARITY,
     )
-    pos_vec = make_unitary(dim=mp.rep_vocab_dim)
+    pos_vec = make_unitary(dim=model_defaults.VOCAB_DIMENSIONS)
     model_vocab.add("POS", pos_vec)
 
     for key, pointer in seed_vocab_vectors.items():
         model_vocab.add(key=key, p=pointer)
 
-    model_vocab.add(key=mp.pad_token, p=np.zeros(mp.rep_vocab_dim))
+    model_vocab.add(
+        key=data_defaults.PAD_TOKEN,
+        p=np.zeros(model_defaults.VOCAB_DIMENSIONS),
+    )
     timings["Vocabulary build"] = perf_counter() - start
     return model_vocab
 
@@ -202,7 +206,9 @@ def resolve_training_configuration(args, runtime_profile=None):
     profile_training = runtime_profile.get("training", {}) if runtime_profile else {}
     profile_runtime = runtime_profile.get("runtime", {}) if runtime_profile else {}
 
-    step_time = float(profile_runtime.get("default_step_time", DEFAULT_STEP_TIME))
+    step_time = float(
+        profile_runtime.get("default_step_time", DEFAULT_STEP_TIME_SECONDS)
+    )
     training_mode = args.train_mode.replace("-", "_")
 
     if args.token_duration is not None:
@@ -254,9 +260,9 @@ def build_model_result(
     start = perf_counter()
     with compile_profile_scope(compile_profile_config):
         model_result = nc.Model(
-            sub_lengths=[1, mp.context_length],
+            sub_lengths=[1, model_defaults.CONTEXT_LENGTH],
             model_vocab=model_vocab,
-            strict=mp.strict_vocab,
+            strict=data_defaults.STRICT_VOCAB,
             probe_mode=probe_mode,
             learned_init_mode=learned_init_mode,
             learned_init_seed=learned_init_seed,
@@ -371,9 +377,9 @@ def make_compile_fingerprint(
         "opencl_device": compile_profile["opencl_device"],
         "opencl_platform_index": opencl_selection.get("platform_index"),
         "opencl_device_index": opencl_selection.get("device_index"),
-        "rep_vocab_dim": mp.rep_vocab_dim,
-        "context_length": mp.context_length,
-        "strict_vocab": mp.strict_vocab,
+        "rep_vocab_dim": model_defaults.VOCAB_DIMENSIONS,
+        "context_length": model_defaults.CONTEXT_LENGTH,
+        "strict_vocab": data_defaults.STRICT_VOCAB,
         "sub_lengths": model_result.sub_lengths,
         "sub_lengths_mode": "legacy_deferred",
         "architecture_name": model_result.architecture_spec.name,
@@ -401,7 +407,7 @@ def build_runtime(
     timings,
     opencl_platform_index=None,
     opencl_device_index=None,
-    step_time=DEFAULT_STEP_TIME,
+    step_time=DEFAULT_STEP_TIME_SECONDS,
     first_run_warmup=False,
     profile_compile=False,
     probe_mode=DEFAULT_PROBE_MODE,
@@ -585,8 +591,8 @@ def save_build_only_telemetry(
             "architecture_name": model_result.architecture_spec.name,
             "sub_lengths": model_result.sub_lengths,
             "sub_lengths_mode": "legacy_deferred",
-            "context_length": mp.context_length,
-            "rep_vocab_dim": mp.rep_vocab_dim,
+            "context_length": model_defaults.CONTEXT_LENGTH,
+            "rep_vocab_dim": model_defaults.VOCAB_DIMENSIONS,
             "probe_mode": model_result.probe_mode,
             "active_context_path": "root_context_module",
             **training_config,
@@ -709,11 +715,11 @@ def save_run_telemetry(context):
         "parameters": {
             "sub_lengths": model_result.sub_lengths,
             "sub_lengths_mode": "legacy_deferred",
-            "context_length": mp.context_length,
-            "rep_vocab_dim": mp.rep_vocab_dim,
+            "context_length": model_defaults.CONTEXT_LENGTH,
+            "rep_vocab_dim": model_defaults.VOCAB_DIMENSIONS,
             "probe_mode": model_result.probe_mode,
-            "training_restriction": mp.training_restriction,
-            "testing_restriction": mp.testing_restriction,
+            "training_restriction": data_defaults.TRAINING_DOCUMENT_LIMIT,
+            "testing_restriction": data_defaults.TESTING_DOCUMENT_LIMIT,
             "active_context_path": "root_context_module",
             "evaluation_mode": "streaming",
             **runtime.training_configuration(),

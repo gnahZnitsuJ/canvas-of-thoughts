@@ -4,6 +4,8 @@ import copy
 import json
 from pathlib import Path
 
+from config.runtime_defaults import DEFAULT_STEP_TIME_SECONDS
+
 RUNTIME_PROFILE_SCHEMA_VERSION = 1
 
 DEFAULT_RUNTIME_PROFILE = {
@@ -11,7 +13,7 @@ DEFAULT_RUNTIME_PROFILE = {
     "training": {
         "mode": "single_pass",
         "scheduled_training_enabled": False,
-        "token_duration": 0.02,
+        "token_duration": DEFAULT_STEP_TIME_SECONDS,
         "token_duration_source": "default",
         "calibrated": False,
     },
@@ -21,7 +23,7 @@ DEFAULT_RUNTIME_PROFILE = {
         "stride": 1,
     },
     "runtime": {
-        "default_step_time": 0.02,
+        "default_step_time": DEFAULT_STEP_TIME_SECONDS,
     },
     "opencl": {
         "platform_index": None,

@@ -1,7 +1,9 @@
-# for partitioning of training and testing data
+"""Partition configured corpora into model-ready train and test sequences."""
 
-from config import model_parameters as mp
 import re
+
+from config import data_defaults
+
 
 class ds_part:
     def __init__(self, training_ids, testing_ids, training_set, testing_set, vocab):
@@ -19,9 +21,9 @@ def data_partition(ds, training_restriction=0, testing_restriction=0, strict=Fal
 
     # restriction of training set for time's sake
     if training_restriction > 0:
-        training_ids = training_ids[:mp.training_restriction]
+        training_ids = training_ids[:training_restriction]
     if testing_restriction > 0:
-        testing_ids = testing_ids[:mp.testing_restriction]
+        testing_ids = testing_ids[:testing_restriction]
 
     # train and validation split
 
@@ -37,9 +39,9 @@ def data_partition(ds, training_restriction=0, testing_restriction=0, strict=Fal
     vocab = list(set(vocab)) # unique words
 
     if strict:
-        vocab += [mp.unknown_token] # unknown placeholder (in strict case)
+        vocab += [data_defaults.UNKNOWN_TOKEN] # unknown placeholder (in strict case)
     
-    vocab += [mp.pad_token] # padding character
+    vocab += [data_defaults.PAD_TOKEN] # padding character
     # print(len(vocab))
 
     # training set generation
@@ -60,8 +62,13 @@ def data_partition(ds, training_restriction=0, testing_restriction=0, strict=Fal
                    testing_set=testing_set, 
                    vocab=vocab)
 
-def multiple_data_partition(datasets=[], context_length=mp.context_length, training_restriction=0, testing_restriction=0, strict=False):
-    """data_partition, but for multiple datasets"""
+def multiple_data_partition(
+    datasets,
+    training_restriction=0,
+    testing_restriction=0,
+    strict=False,
+):
+    """Combine partitions from multiple datasets into one deduplicated result."""
     
     training_ids = []
     testing_ids = []

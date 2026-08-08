@@ -3,7 +3,6 @@
 import argparse
 import gc
 import sys
-from contextlib import contextmanager
 from pathlib import Path
 from time import perf_counter
 
@@ -21,7 +20,7 @@ import numpy as np
 import components.net_comp as nc
 import components.net_classes as ncls
 from architecture.variants import DEFAULT_ARCHITECTURE_NAME, available_architectures
-from config import model_parameters as mp
+from config import data_defaults, model_defaults
 from utils.build_config import (
     DEFAULT_COMPILE_PROFILE_NAME,
     DEFAULT_LEARNED_INIT_MODE,
@@ -49,20 +48,10 @@ RESULTS_DIR = MODEL_DIR / "results"
 BENCHMARK_MODES = ("full", "components", "current", "repeat-current")
 
 
-@contextmanager
-def representation_dimension(dimensions):
-    previous = mp.rep_vocab_dim
-    mp.rep_vocab_dim = dimensions
-    try:
-        yield
-    finally:
-        mp.rep_vocab_dim = previous
-
-
 def make_vocab(dimensions):
     vocab = spa.Vocabulary(dimensions, strict=False, pointer_gen=None)
     vocab.add("POS", np.ones(dimensions) / np.sqrt(dimensions))
-    vocab.add(mp.pad_token, np.zeros(dimensions))
+    vocab.add(data_defaults.PAD_TOKEN, np.zeros(dimensions))
     return vocab
 
 
@@ -96,74 +85,73 @@ def compile_case(
     repeat_index=None,
     architecture_name=DEFAULT_ARCHITECTURE_NAME,
 ):
-    with representation_dimension(dimensions):
-        vocab = make_vocab(dimensions)
-        compile_profile = resolve_compile_profile(compile_profile_name)
+    vocab = make_vocab(dimensions)
+    compile_profile = resolve_compile_profile(compile_profile_name)
 
-        start = perf_counter()
-        with compile_profile_scope(compile_profile):
-            model_result = nc.Model(
-                sub_lengths,
-                vocab,
-                strict=False,
-                probe_mode=probe_mode,
-                learned_init_mode=learned_init_mode,
-                learned_init_seed=learned_init_seed,
-                compile_profile_name=compile_profile["name"],
-                compile_profile_settings=compile_profile["settings"],
-                architecture_name=architecture_name,
-            )
-        model_build_seconds = perf_counter() - start
-
-        start = perf_counter()
-        if simulator_name == "nengo":
-            simulator = nengo.Simulator(
-                model_result.model,
-                progress_bar=False,
-            )
-        else:
-            simulator = nengo_ocl.Simulator(
-                model_result.model,
-                context=context,
-                progress_bar=False,
-            )
-        simulator_compile_seconds = perf_counter() - start
-        first_run_warmup_seconds = (
-            run_first_step_warmup(simulator)
-            if include_first_run_warmup
-            else None
+    start = perf_counter()
+    with compile_profile_scope(compile_profile):
+        model_result = nc.Model(
+            sub_lengths,
+            vocab,
+            strict=False,
+            probe_mode=probe_mode,
+            learned_init_mode=learned_init_mode,
+            learned_init_seed=learned_init_seed,
+            compile_profile_name=compile_profile["name"],
+            compile_profile_settings=compile_profile["settings"],
+            architecture_name=architecture_name,
         )
+    model_build_seconds = perf_counter() - start
 
-        result = {
-            "name": name,
-            "simulator": simulator_name,
-            "repeat_index": repeat_index,
-            "sub_lengths": sub_lengths,
-            "context_length": max(sub_lengths),
-            "rep_vocab_dim": dimensions,
-            "probe_mode": model_result.probe_mode,
-            "compile_profile": compile_profile,
-            "learned_init_mode": learned_init_mode,
-            "learned_init_seed": learned_init_seed,
-            "architecture_name": architecture_name,
-            "architecture_signature": model_result.architecture_topology_signature,
-            "model_build_seconds": model_build_seconds,
-            "simulator_compile_seconds": simulator_compile_seconds,
-            "first_run_warmup_seconds": first_run_warmup_seconds,
-            "network": network_telemetry(model_result.model),
-            "operators": operator_telemetry(simulator),
-            "probes": {
-                "mode": model_result.probe_mode,
-                "created_labels": model_result.created_probe_labels,
-                "skipped_labels": model_result.skipped_probe_labels,
-            },
-        }
+    start = perf_counter()
+    if simulator_name == "nengo":
+        simulator = nengo.Simulator(
+            model_result.model,
+            progress_bar=False,
+        )
+    else:
+        simulator = nengo_ocl.Simulator(
+            model_result.model,
+            context=context,
+            progress_bar=False,
+        )
+    simulator_compile_seconds = perf_counter() - start
+    first_run_warmup_seconds = (
+        run_first_step_warmup(simulator)
+        if include_first_run_warmup
+        else None
+    )
 
-        simulator.close()
-        del simulator
-        del model_result
-        gc.collect()
-        return result
+    result = {
+        "name": name,
+        "simulator": simulator_name,
+        "repeat_index": repeat_index,
+        "sub_lengths": sub_lengths,
+        "context_length": max(sub_lengths),
+        "rep_vocab_dim": dimensions,
+        "probe_mode": model_result.probe_mode,
+        "compile_profile": compile_profile,
+        "learned_init_mode": learned_init_mode,
+        "learned_init_seed": learned_init_seed,
+        "architecture_name": architecture_name,
+        "architecture_signature": model_result.architecture_topology_signature,
+        "model_build_seconds": model_build_seconds,
+        "simulator_compile_seconds": simulator_compile_seconds,
+        "first_run_warmup_seconds": first_run_warmup_seconds,
+        "network": network_telemetry(model_result.model),
+        "operators": operator_telemetry(simulator),
+        "probes": {
+            "mode": model_result.probe_mode,
+            "created_labels": model_result.created_probe_labels,
+            "skipped_labels": model_result.skipped_probe_labels,
+        },
+    }
+
+    simulator.close()
+    del simulator
+    del model_result
+    gc.collect()
+    return result
 
 
 def component_case(
@@ -175,37 +163,36 @@ def component_case(
     *,
     compile_profile_name=DEFAULT_COMPILE_PROFILE_NAME,
 ):
-    with representation_dimension(dimensions):
-        vocab = make_vocab(dimensions)
-        compile_profile = resolve_compile_profile(compile_profile_name)
-        start = perf_counter()
-        with compile_profile_scope(compile_profile):
-            network = builder(vocab)
-        model_build_seconds = perf_counter() - start
+    vocab = make_vocab(dimensions)
+    compile_profile = resolve_compile_profile(compile_profile_name)
+    start = perf_counter()
+    with compile_profile_scope(compile_profile):
+        network = builder(vocab)
+    model_build_seconds = perf_counter() - start
 
-        start = perf_counter()
-        if simulator_name == "nengo":
-            simulator = nengo.Simulator(network, progress_bar=False)
-        else:
-            simulator = nengo_ocl.Simulator(
-                network,
-                context=context,
-                progress_bar=False,
-            )
-        simulator_compile_seconds = perf_counter() - start
+    start = perf_counter()
+    if simulator_name == "nengo":
+        simulator = nengo.Simulator(network, progress_bar=False)
+    else:
+        simulator = nengo_ocl.Simulator(
+            network,
+            context=context,
+            progress_bar=False,
+        )
+    simulator_compile_seconds = perf_counter() - start
 
-        result = {
-            "name": name,
-            "simulator": simulator_name,
-            "rep_vocab_dim": dimensions,
-            "compile_profile": compile_profile,
-            "model_build_seconds": model_build_seconds,
-            "simulator_compile_seconds": simulator_compile_seconds,
-            "network": network_telemetry(network),
-            "operators": operator_telemetry(simulator),
-        }
-        simulator.close()
-        return result
+    result = {
+        "name": name,
+        "simulator": simulator_name,
+        "rep_vocab_dim": dimensions,
+        "compile_profile": compile_profile,
+        "model_build_seconds": model_build_seconds,
+        "simulator_compile_seconds": simulator_compile_seconds,
+        "network": network_telemetry(network),
+        "operators": operator_telemetry(simulator),
+    }
+    simulator.close()
+    return result
 
 
 def build_base_component(
@@ -214,7 +201,7 @@ def build_base_component(
     learned_init_mode=DEFAULT_LEARNED_INIT_MODE,
     learned_init_seed=None,
 ):
-    with spa.Network(seed=mp.seed) as network:
+    with spa.Network(seed=model_defaults.MODEL_SEED) as network:
         context = InputModule(vocab.dimensions)
         target = InputModule(vocab.dimensions)
         ncls.BaseComponent(
@@ -300,8 +287,8 @@ def benchmark(
         scaling = [
             compile_case(
                 "current_configuration",
-                [1, mp.context_length],
-                mp.rep_vocab_dim,
+                [1, model_defaults.CONTEXT_LENGTH],
+                model_defaults.VOCAB_DIMENSIONS,
                 "nengo_ocl",
                 context,
                 probe_mode,
@@ -315,8 +302,8 @@ def benchmark(
         repeat_compile = [
             compile_case(
                 "repeat_current_configuration",
-                [1, mp.context_length],
-                mp.rep_vocab_dim,
+                [1, model_defaults.CONTEXT_LENGTH],
+                model_defaults.VOCAB_DIMENSIONS,
                 "nengo_ocl",
                 context,
                 probe_mode,

@@ -4,6 +4,7 @@ from time import perf_counter
 
 import numpy as np
 
+from config.runtime_defaults import DEFAULT_STEP_TIME_SECONDS
 from utils.eval import evaluate_model_streaming_metrics, iter_next_token_predictions
 
 # Reference-equivalence calibration compares scheduled-training updates against
@@ -215,7 +216,7 @@ def calibrate_token_duration(
     train_sequences,
     test_sequences,
     candidates=None,
-    baseline_duration=0.02,
+    baseline_duration=DEFAULT_STEP_TIME_SECONDS,
     calibration_train_sequences=2,
     calibration_eval_examples=50,
     top_k=3,

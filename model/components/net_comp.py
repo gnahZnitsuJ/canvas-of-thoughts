@@ -4,7 +4,7 @@ from architecture.assembly import AssembledModelResult, assemble_architecture
 from architecture.components import default_component_registry
 from architecture.contracts import ArchitectureBuildContext
 from architecture.variants import DEFAULT_ARCHITECTURE_NAME, architecture_spec
-from config import model_parameters as mp
+from config import data_defaults, model_defaults
 from utils.build_config import DEFAULT_COMPILE_PROFILE_NAME, DEFAULT_LEARNED_INIT_MODE
 from utils.probes import DEFAULT_PROBE_MODE, ProbeRegistry
 
@@ -16,7 +16,7 @@ ModelResult = AssembledModelResult
 def Model(
     sub_lengths,
     model_vocab,
-    strict=mp.strict_vocab,
+    strict=data_defaults.STRICT_VOCAB,
     probe_mode=DEFAULT_PROBE_MODE,
     learned_init_mode=DEFAULT_LEARNED_INIT_MODE,
     learned_init_seed=None,
@@ -38,7 +38,7 @@ def Model(
     context = ArchitectureBuildContext(
         vocab=model_vocab,
         dimensions=model_vocab.dimensions,
-        seed=mp.seed,
+        seed=model_defaults.MODEL_SEED,
         strict_vocab=strict,
         probe_registry=probe_registry,
         compile_profile=compile_profile,
