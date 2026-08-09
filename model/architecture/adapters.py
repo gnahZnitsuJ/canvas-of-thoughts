@@ -1,4 +1,4 @@
-"""Contract adapters for the model's existing input, memory, and learners."""
+"""Build concrete Nengo subsystems behind the architecture contracts."""
 
 import numpy as np
 import nengo

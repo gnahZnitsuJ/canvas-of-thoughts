@@ -180,7 +180,7 @@ class ArchitectureContractTests(unittest.TestCase):
             [
                 "import sys",
                 f"sys.path.insert(0, {str(MODEL_DIR)!r})",
-                "from architecture.components import default_component_registry",
+                "from architecture.adapters import default_component_registry",
                 "assert 'context_memory' in default_component_registry()",
             ]
         )

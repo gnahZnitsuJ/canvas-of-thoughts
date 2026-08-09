@@ -1,7 +1,7 @@
 """Compatibility entrypoint for assembling the selected model architecture."""
 
 from architecture.assembly import AssembledModelResult, assemble_architecture
-from architecture.components import default_component_registry
+from architecture.adapters import default_component_registry
 from architecture.contracts import ArchitectureBuildContext
 from architecture.variants import DEFAULT_ARCHITECTURE_NAME, architecture_spec
 from config import data_defaults, model_defaults
