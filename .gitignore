@@ -2,7 +2,7 @@ __pycache__/
 *.py[cod]
 .agents/
 .vscode/
-model/utils/seed_vocab.model
+model/utils/seed_vocab*.model
 model/checkpoints/
 model/results/
 model/config/runtime_profile.json

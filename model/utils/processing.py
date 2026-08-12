@@ -1,71 +1,45 @@
-# preprocessing functions
+"""Encode arbitrary model tokens as reversible NengoSPA vocabulary keys."""
 
-import re
+import base64
+import binascii
+
 from config import data_defaults
 
-# vocabulary preprocessing functions to overcome limitations with
-#   nengo_spa python identifier limitations
-CharReplacements = {
-    '!': 'CV_EXCLAMATION_MARK',
-    '"': 'CV_DOUBLE_QUOTE',
-    '#': 'CV_HASH',
-    '$': 'CV_DOLLAR_SIGN',
-    '%': 'CV_PERCENT_SIGN',
-    '&': 'CV_AMPERSAND',
-    "'": 'CV_SINGLE_QUOTE',
-    '(': 'CV_LEFT_PARENTHESIS',
-    ')': 'CV_RIGHT_PARENTHESIS',
-    '*': 'CV_ASTERISK',
-    '+': 'CV_PLUS',
-    ',': 'CV_COMMA',
-    '-': 'CV_HYPHEN',
-    '.': 'CV_PERIOD',
-    '/': 'CV_FORWARD_SLASH',
-    ':': 'CV_COLON',
-    ';': 'CV_SEMICOLON',
-    '<': 'CV_LESS_THAN',
-    '=': 'CV_EQUALS',
-    '>': 'CV_GREATER_THAN',
-    '?': 'CV_QUESTION_MARK',
-    '@': 'CV_AT_SYMBOL',
-    '[': 'CV_LEFT_BRACKET',
-    '\\': 'CV_BACKSLASH',
-    ']': 'CV_RIGHT_BRACKET',
-    '^': 'CV_CARET',
-    '_': 'CV_UNDERSCORE',
-    '`': 'CV_GRAVE_ACCENT',
-    '{': 'CV_LEFT_BRACE',
-    '|': 'CV_PIPE',
-    '}': 'CV_RIGHT_BRACE',
-    '~': 'CV_TILDE',
-}
 
-CharReplacementsTable = str.maketrans(CharReplacements) # translation table
+_TOKEN_KEY_PREFIX = "WV_B32_"
 
-InvCharReplacements = {v:k for k, v in CharReplacements.items()} # inverse dict for translation
 
-# turning "words" (tokens) to usable identifiers
-def WordsToSPAVocab(w: list):
-    # translate special characters capital start for identifiers
-    words = [
-        "WV_" + x.translate(CharReplacementsTable)
-        for x in w
-        if x != data_defaults.PAD_TOKEN
-    ]
-    return words
+def token_to_spa_key(token):
+    """Return a collision-free Python identifier for one already-delimited token."""
+    if token in {data_defaults.PAD_TOKEN, data_defaults.UNKNOWN_TOKEN}:
+        return token
+    if not isinstance(token, str) or token == "":
+        raise ValueError("SPA vocabulary tokens must be non-empty strings")
 
-# turning usable identifiers into "words" (tokens)
-def SPAVocabToWords(w: list):
-    
-    # Create a function to replace all the placeholders with their corresponding characters
-    def replace_placeholder_with_char(match):
-        word = match.group(0)
-        return InvCharReplacements.get(word, word)  # Return the original if no replacement exists
+    encoded = base64.b32encode(token.encode("utf-8")).decode("ascii").rstrip("=")
+    return _TOKEN_KEY_PREFIX + encoded
 
-    # Regular expression to match all the placeholder words (e.g., "EXCLAMATION_MARK")
-    pattern = r'\b(?:' + '|'.join(map(re.escape, InvCharReplacements.keys())) + r')\b'
 
-    # inverse operations for WordsToSPAVocab
-    w = [x[3:] for x in w]
-    w = [re.sub(pattern, replace_placeholder_with_char, x) for x in w] # removing special characters
-    return w
+def spa_key_to_token(key):
+    """Decode a key produced by :func:`token_to_spa_key`."""
+    if key in {data_defaults.PAD_TOKEN, data_defaults.UNKNOWN_TOKEN}:
+        return key
+    if not key.startswith(_TOKEN_KEY_PREFIX):
+        raise ValueError(f"Not a token vocabulary key: {key!r}")
+
+    payload = key[len(_TOKEN_KEY_PREFIX) :]
+    padding = "=" * (-len(payload) % 8)
+    try:
+        return base64.b32decode(payload + padding).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError) as exc:
+        raise ValueError(f"Invalid token vocabulary key: {key!r}") from exc
+
+
+def WordsToSPAVocab(words):
+    """Compatibility wrapper that encodes a sequence of model tokens."""
+    return [token_to_spa_key(token) for token in words]
+
+
+def SPAVocabToWords(keys):
+    """Compatibility wrapper that decodes a sequence of vocabulary keys."""
+    return [spa_key_to_token(key) for key in keys]

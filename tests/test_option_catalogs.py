@@ -28,6 +28,7 @@ from utils.build_config import (  # noqa: E402
     validate_learned_init_configuration,
 )
 from utils.probes import DEFAULT_PROBE_MODE, VALID_PROBE_MODES  # noqa: E402
+from utils.tokenization import available_tokenizers  # noqa: E402
 
 
 class OptionCatalogTests(unittest.TestCase):
@@ -74,6 +75,7 @@ class OptionCatalogTests(unittest.TestCase):
         self.assertIn(DEFAULT_LEARNED_INIT_MODE, LEARNED_INIT_MODES)
         self.assertIn(DEFAULT_PROBE_MODE, VALID_PROBE_MODES)
         self.assertIn(DEFAULT_TRAINING_MODE, VALID_TRAINING_MODES)
+        self.assertIn("word-v1", available_tokenizers())
         self.assertEqual(
             app_args.TRAINING_MODE_CHOICES,
             tuple(mode.replace("_", "-") for mode in VALID_TRAINING_MODES),

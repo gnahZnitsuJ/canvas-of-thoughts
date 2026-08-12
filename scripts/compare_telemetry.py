@@ -26,6 +26,8 @@ CONTROL_FIELDS = (
     "compile_profile.settings",
     "learned_init.mode",
     "learned_init.seed",
+    "tokenizer.name",
+    "tokenizer.fingerprint",
 )
 
 METRIC_FIELDS = (
@@ -44,6 +46,7 @@ METRIC_FIELDS = (
 GROUPS = {
     "compile_profile": {"compile_profile.name", "compile_profile.settings"},
     "learned_init": {"learned_init.mode", "learned_init.seed"},
+    "tokenizer": {"tokenizer.name", "tokenizer.fingerprint"},
     "source": {"source.commit", "source.dirty", "source.snapshot"},
     "opencl": {"opencl.platform", "opencl.device"},
     "architecture": {
@@ -104,6 +107,12 @@ def normalize(document, path):
         profile = case.get("compile_profile") or document_profile or fingerprint.get(
             "compile_profile", {}
         )
+        tokenizer = (
+            case.get("tokenizer")
+            or parameters.get("tokenizer")
+            or fingerprint.get("tokenizer")
+            or {}
+        )
         network = case.get("network") or _first(
             document, "complexity.network", default={}
         )
@@ -156,6 +165,8 @@ def normalize(document, path):
             "learned_init.seed": case.get("learned_init_seed")
             if "learned_init_seed" in case
             else document.get("learned_init_seed", fingerprint.get("learned_init_seed")),
+            "tokenizer.name": tokenizer.get("name"),
+            "tokenizer.fingerprint": tokenizer.get("fingerprint"),
             "model_build_seconds": case.get("model_build_seconds")
             if case
             else timings.get("Model build")
@@ -577,7 +588,8 @@ def parse_args(argv=None):
         default=[],
         help=(
             "Declare an intended independent variable. Groups: compile_profile, "
-            "learned_init, source, opencl, architecture; or use an exact field."
+            "learned_init, tokenizer, source, opencl, architecture; or use an "
+            "exact field."
         ),
     )
     parser.add_argument("--strict", action="store_true", help="Fail on unexpected control differences.")

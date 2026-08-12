@@ -13,6 +13,14 @@ sys.path.insert(0, str(MODEL_DIR))
 from app import workflow  # noqa: E402
 
 
+class FakeTokenizer:
+    def fingerprint(self):
+        return "tokenizer-fingerprint"
+
+    def metadata(self):
+        return {"name": "word-v1", "fingerprint": self.fingerprint()}
+
+
 def workflow_args(**overrides):
     values = {
         "full": False,
@@ -40,6 +48,10 @@ def workflow_args(**overrides):
         "learned_init_mode": "zero-nosolver",
         "learned_init_seed": None,
         "architecture": "root-context-v1",
+        "tokenizer": "word-v1",
+        "tokenizer_normalization": "NFC",
+        "tokenizer_vocab_size": 512,
+        "tokenizer_max_subword_length": 12,
         "opencl_platform_index": None,
         "opencl_device_index": None,
         "first_run_warmup": False,
@@ -95,6 +107,7 @@ class WorkflowOrchestrationTests(unittest.TestCase):
         runtime = SimpleNamespace(
             sim=object(),
             training_mode="single_pass",
+            tokenizer=None,
             training_configuration=lambda: {"training_mode": "single_pass"},
         )
         model_result = SimpleNamespace(
@@ -162,6 +175,7 @@ class WorkflowOrchestrationTests(unittest.TestCase):
             vocab=["TOKEN"],
             training_set=[["a", "b"]],
             testing_set=[["a", "b"]],
+            tokenizer=FakeTokenizer(),
         )
         runtime = FakeRuntime(events)
         compiled = workflow.CompiledRun(
@@ -283,8 +297,8 @@ class WorkflowOrchestrationTests(unittest.TestCase):
             [
                 "load-profile",
                 "resolve-training",
-                "load-seed",
                 "build-data",
+                "load-seed",
                 "build-vocab",
                 "build-runtime",
                 "configure",
@@ -311,7 +325,11 @@ class WorkflowOrchestrationTests(unittest.TestCase):
             inspect_checkpoint=True,
             compare_current_architecture=True,
         )
-        train_test = SimpleNamespace(vocab=["TOKEN"])
+        train_test = SimpleNamespace(
+            vocab=["TOKEN"],
+            training_set=[["TOKEN"]],
+            tokenizer=FakeTokenizer(),
+        )
         model_result = object()
 
         def record(name, result=None):
@@ -419,8 +437,8 @@ class WorkflowOrchestrationTests(unittest.TestCase):
             [
                 "inspect",
                 "print-metadata",
-                "load-seed",
                 "build-data",
+                "load-seed",
                 "build-vocab",
                 "build-model",
                 "compare",

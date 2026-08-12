@@ -1,5 +1,6 @@
 """Runtime, checkpoint, and compatibility behavior for assembled Nengo models."""
 
+import hashlib
 import os
 import pickle
 from datetime import datetime
@@ -8,6 +9,7 @@ from time import perf_counter
 import numpy as np
 from tqdm import tqdm
 
+from config import data_defaults
 from config.runtime_defaults import DEFAULT_STEP_TIME_SECONDS
 from utils.processing import SPAVocabToWords, WordsToSPAVocab
 
@@ -15,6 +17,17 @@ from utils.processing import SPAVocabToWords, WordsToSPAVocab
 TRAINING_SEMANTICS_VERSION = "root_context_single_pass_v1"
 VALID_TRAINING_MODES = ("single_pass", "scheduled")
 DEFAULT_TRAINING_MODE = "single_pass"
+
+
+def build_vocabulary_fingerprint(model_vocab):
+    """Hash key order and exact vectors that define learned-state coordinates."""
+    digest = hashlib.sha256()
+    for key, vector in zip(model_vocab.keys(), model_vocab.vectors):
+        key_bytes = key.encode("utf-8")
+        digest.update(len(key_bytes).to_bytes(4, "big"))
+        digest.update(key_bytes)
+        digest.update(np.asarray(vector, dtype="<f8").tobytes())
+    return digest.hexdigest()
 
 
 def resolve_checkpoint_path(filename):
@@ -70,6 +83,7 @@ def build_architecture_signature(
     model_vocab,
     step_time,
     compile_fingerprint=None,
+    tokenizer_metadata=None,
 ):
     """Build the checkpoint-compatibility signature without requiring a simulator."""
     compile_fingerprint = compile_fingerprint or {}
@@ -79,6 +93,8 @@ def build_architecture_signature(
         "architecture_topology": model_result.architecture_topology_signature,
         "vocab_dim": model_vocab.dimensions,
         "strict_vocab": model_result.strict,
+        "vocabulary_fingerprint": build_vocabulary_fingerprint(model_vocab),
+        "tokenizer": tokenizer_metadata,
         "step_time": float(step_time),
         "training_semantics_version": TRAINING_SEMANTICS_VERSION,
         "num_learning_connections": len(model_result.learning_connections),
@@ -109,6 +125,8 @@ def _architecture_field_category(field):
         return "compile-profile"
     if field.startswith("learned_init_"):
         return "learned-init"
+    if field in {"tokenizer", "vocabulary_fingerprint"}:
+        return "tokenization"
     if field in {"step_time", "training_semantics_version"}:
         return "training-semantic"
     return "structural"
@@ -190,17 +208,20 @@ class ModelRuntime:
         model_result,
         sim,
         model_vocab,
+        tokenizer=None,
         step_time=DEFAULT_STEP_TIME_SECONDS,
     ):
         self.model_result = model_result
         self.model = model_result.model
         self.sim = sim
         self.model_vocab = model_vocab
+        self.tokenizer = tokenizer
         self.step_time = float(step_time)
         self.compile_fingerprint = None
 
         # Cache normalized vocabulary vectors so prediction decoding stays cheap.
         self.vocab_keys = list(model_vocab.keys())
+        self.vocab_key_set = set(self.vocab_keys)
         self.vocab_vectors = model_vocab.vectors
         self.vocab_norms = np.linalg.norm(self.vocab_vectors, axis=1)
         self.normalized_vocab_vectors = self.vocab_vectors / np.maximum(
@@ -333,16 +354,27 @@ class ModelRuntime:
         self._zero_io_buffers()
         self.model_result.target_module.is_recall = True
 
-    # convert a token into the semantic pointer used by the network
     def _vector_for(self, token):
+        """Resolve a token without allowing late random vocabulary growth."""
         token_key = WordsToSPAVocab([token])[0]
+        if token_key not in self.vocab_key_set:
+            token_key = data_defaults.UNKNOWN_TOKEN
         return self.model_vocab[token_key].v
 
-    # translate semantic pointer keys back into readable tokens for demo output
     def _decode_key(self, token_key):
+        """Translate one SPA key into a displayable tokenizer token."""
         if token_key.startswith("WV_"):
-            return SPAVocabToWords([token_key])[0]
+            token = SPAVocabToWords([token_key])[0]
+            if self.tokenizer is not None:
+                return self.tokenizer.display_token(token)
+            return token
         return token_key
+
+    def decode_tokens(self, tokens):
+        """Render a generated sequence according to the active tokenizer."""
+        if self.tokenizer is None:
+            return " ".join(tokens)
+        return self.tokenizer.decode(tokens)
 
     # choose the closest words in vocabulary space to the current model output
     def _top_predictions(self, vector, top_k=3):
@@ -474,7 +506,11 @@ class ModelRuntime:
         return self.current_predictions(top_k=top_k)
 
     def interactive_predict(self, text, top_k=5, reset_context=True):
-        tokens = text.strip().split()
+        tokens = (
+            self.tokenizer.encode(text)
+            if self.tokenizer is not None
+            else text.strip().split()
+        )
 
         if len(tokens) == 0:
             return []
@@ -494,7 +530,11 @@ class ModelRuntime:
         reset_context=True,
         verbose=False,
     ):
-        tokens = prompt.strip().split()
+        tokens = (
+            self.tokenizer.encode(prompt)
+            if self.tokenizer is not None
+            else prompt.strip().split()
+        )
 
         if len(tokens) == 0:
             return []
@@ -556,6 +596,9 @@ class ModelRuntime:
             self.model_vocab,
             self.step_time,
             compile_fingerprint=self.compile_fingerprint,
+            tokenizer_metadata=(
+                self.tokenizer.metadata() if self.tokenizer is not None else None
+            ),
         )
 
     # saving model

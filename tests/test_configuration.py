@@ -11,6 +11,7 @@ from config import data_defaults, model_defaults  # noqa: E402
 from config.runtime_defaults import DEFAULT_STEP_TIME_SECONDS  # noqa: E402
 from utils.runtime_profile import default_runtime_profile  # noqa: E402
 from utils.train_partition import data_partition  # noqa: E402
+from utils.tokenization import available_tokenizers  # noqa: E402
 
 
 class FakeDataset:
@@ -39,6 +40,9 @@ class ConfigurationTests(unittest.TestCase):
             len(data_defaults.DATASET_NAMES),
             len(set(data_defaults.DATASET_NAMES)),
         )
+        self.assertIn(data_defaults.TOKENIZER_NAME, available_tokenizers())
+        self.assertGreater(data_defaults.TOKENIZER_VOCAB_SIZE, 0)
+        self.assertGreater(data_defaults.TOKENIZER_MAX_SUBWORD_LENGTH, 0)
 
     def test_runtime_profile_example_matches_committed_defaults(self):
         example_path = MODEL_DIR / "config" / "runtime_profile.example.json"
@@ -60,7 +64,6 @@ class ConfigurationTests(unittest.TestCase):
             FakeDataset(),
             training_restriction=1,
             testing_restriction=2,
-            strict=True,
         )
 
         self.assertEqual(partition.training_ids, ["training/one"])

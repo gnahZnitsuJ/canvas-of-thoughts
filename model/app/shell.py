@@ -17,8 +17,8 @@ def run_demo_predictions(runtime, testing_set, max_examples, top_k):
                 for word, score in result["predictions"]
             )
             print(
-                f"{' '.join(result['prefix'])} -> {prediction_text} "
-                f"| target: {result['target']}"
+                f"{runtime.decode_tokens(result['prefix'])} -> {prediction_text} "
+                f"| target: {runtime.decode_tokens([result['target']])}"
             )
 
             demo_count += 1
@@ -39,10 +39,10 @@ def _print_predictions(predictions):
     print(prediction_text)
 
 
-def _print_generated(tokens):
+def _print_generated(runtime, tokens):
     """Render generated output from the autoregressive shell path."""
     print("generated:")
-    print(" ".join(tokens))
+    print(runtime.decode_tokens(tokens))
 
 
 def _print_timing(label, elapsed):
@@ -159,7 +159,7 @@ def _handle_interactive_text(runtime, text, top_k, generate, max_tokens):
             reset_context=False,
             verbose=False,
         )
-        _print_generated(output)
+        _print_generated(runtime, output)
         return
 
     predictions = runtime.interactive_predict(
@@ -235,7 +235,7 @@ def _handle_slash_command(
             reset_context=False,
             verbose=False,
         )
-        _print_generated(output)
+        _print_generated(runtime, output)
         return True
 
     if command == "/eval":

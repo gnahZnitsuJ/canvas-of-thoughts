@@ -2,6 +2,10 @@ This project is an attempt to create a NLP model using Nengo, specifically Nengo
 
 Originally, it started as my final project for AMATH 445 (Scientific Machine Learning) at the University of Waterloo. See https://github.com/gnahZnitsuJ/F24-AMATH-445.
 
+The tokenizer layer uses the third-party `regex` package for Unicode properties
+and extended grapheme clusters. Install it alongside the existing Nengo/NengoSPA
+runtime dependencies before running the model or tokenizer comparison script.
+
 ## Running
 
 The default behavior now uses a cheaper development loop:
@@ -42,6 +46,7 @@ python model/main.py --dry-run --compile-profile fast-solver
 python model/main.py --build-only --probe-mode minimal --compile-profile fast-solver
 python model/main.py --inspect-checkpoint --checkpoint-path reuters_checkpoint.pkl
 python model/main.py --build-only --inspect-checkpoint --compare-current-architecture
+python model/main.py --dry-run --tokenizer bpe-v1
 ```
 
 - `python model/main.py --train --no-eval --no-demo --no-interactive`
@@ -82,6 +87,21 @@ python model/main.py --build-only --inspect-checkpoint --compare-current-archite
   combines checkpoint inspection with a current build-only pass so you can
   compare the saved architecture signature against the present build before
   paying OpenCL compile cost.
+- `python model/main.py --dry-run --tokenizer bpe-v1`
+  selects a versioned tokenizer profile. Available profiles are `word-v1`,
+  `bpe-v1`, `unigram-v1`, `character-v1`, and `byte-v1`. Tokenizer changes use
+  independent seed-vector caches and are checkpoint-incompatible by design.
+
+Compare how profiles segment representative text without building Nengo:
+
+```bash
+python scripts/compare_tokenizers.py --text "Café can't cost 12.50€ 👩🏽‍💻."
+python scripts/compare_tokenizers.py --reuters-docs 2
+```
+
+The comparison reports token counts, unique-token counts, normalized round-trip
+behavior, fingerprints, and a token preview. Repeat `--tokenizer PROFILE` to
+limit the comparison or add `--json` for machine-readable output.
 
 Compile benchmark modes are available directly from `main.py`:
 
@@ -166,6 +186,15 @@ Useful flags:
 - `--architecture root-context-v1|no-refiner-v1`
   assemble the established baseline or the checkpoint-incompatible mechanical
   variant that exposes the context predictor without the top-level refiner
+- `--tokenizer word-v1|bpe-v1|unigram-v1|character-v1|byte-v1`
+  select the text unit advanced through the neural model; learned subword
+  profiles are fitted deterministically on the selected training partition
+- `--tokenizer-vocab-size N`
+  set the vocabulary budget for BPE and unigram fitting
+- `--tokenizer-normalization NFC|NFKC`
+  choose the Unicode normalization policy included in tokenizer identity
+- `--tokenizer-max-subword-length N`
+  bound candidate piece length for the compact unigram profile
 - `--force-retrain`
   ignore an existing checkpoint and retrain from scratch
 - `--compile-profile full|fast-solver`

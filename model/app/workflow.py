@@ -1,6 +1,7 @@
 ﻿"""High-level workflow helpers used by the main model CLI entrypoint."""
 
 import cProfile
+import hashlib
 import os
 from dataclasses import dataclass
 from datetime import datetime
@@ -57,11 +58,11 @@ from utils.telemetry import (
     save_telemetry,
     training_invocation_estimate,
 )
+from utils.tokenization import build_tokenizer
 from utils.train_partition import multiple_data_partition
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 RESULTS_DIR = BASE_DIR / "results"
-SEED_VOCAB_PATH = BASE_DIR / "utils" / "seed_vocab.model"
 DATASET_REGISTRY = {"reuters": reuters}
 DATASETS = tuple(DATASET_REGISTRY[name] for name in data_defaults.DATASET_NAMES)
 COMPILE_PROFILE_ENV_VARS = (
@@ -118,30 +119,80 @@ def invocation_delta(after, before):
     return {key: after[key] - before[key] for key in after}
 
 
-def load_seed_vocab_model():
-    """Load the cached seed Word2Vec model, generating it once if needed."""
-    if SEED_VOCAB_PATH.is_file():
-        print("seed_vocab.model exists.")
-        return Word2Vec.load(str(SEED_VOCAB_PATH))
+def _seed_vocab_path(tokenizer, training_sequences):
+    """Key vector caches by tokenizer, corpus tokens, and initializer settings."""
+    digest = hashlib.sha256()
+    digest.update(data_defaults.SEED_VOCAB_PROFILE.encode("ascii"))
+    digest.update(b"\0")
+    digest.update(tokenizer.fingerprint().encode("ascii"))
+    for value in (
+        model_defaults.VOCAB_DIMENSIONS,
+        model_defaults.CONTEXT_LENGTH,
+        data_defaults.SEED_VOCAB_EPOCHS,
+        model_defaults.MODEL_SEED,
+    ):
+        digest.update(str(value).encode("ascii"))
+        digest.update(b"\0")
+    for sequence in training_sequences:
+        for token in sequence:
+            encoded = token.encode("utf-8")
+            digest.update(len(encoded).to_bytes(4, "big"))
+            digest.update(encoded)
+        digest.update(b"\xff")
+    fingerprint = digest.hexdigest()[:16]
+    return BASE_DIR / "utils" / f"seed_vocab.{fingerprint}.model"
 
-    print("seed_vocab.model does NOT exist.")
-    print("Generating seed vocabulary model...")
-    seed_vocab.generate_seed_vocab(DATASETS, output_path=SEED_VOCAB_PATH)
 
-    if not SEED_VOCAB_PATH.is_file():
-        raise FileNotFoundError(f"Failed to generate {SEED_VOCAB_PATH}")
+def load_seed_vocab_model(tokenizer, training_sequences):
+    """Load or generate vectors for one fitted tokenizer and corpus partition."""
+    seed_vocab_path = _seed_vocab_path(tokenizer, training_sequences)
+    if seed_vocab_path.is_file():
+        print(f"Seed vocabulary cache exists: {seed_vocab_path.name}")
+        return Word2Vec.load(str(seed_vocab_path))
 
-    return Word2Vec.load(str(SEED_VOCAB_PATH))
+    print(f"Generating seed vocabulary cache: {seed_vocab_path.name}")
+    return seed_vocab.generate_seed_vocab(
+        training_sequences,
+        output_path=seed_vocab_path,
+    )
 
 
-def build_train_test(timings):
+def build_train_test(
+    timings,
+    tokenizer_name=None,
+    tokenizer_normalization=None,
+    tokenizer_vocab_size=None,
+    tokenizer_max_subword_length=None,
+):
     """Partition datasets into train/test sequences and record partition time."""
     start = perf_counter()
+    tokenizer = build_tokenizer(
+        (
+            data_defaults.TOKENIZER_NAME
+            if tokenizer_name is None
+            else tokenizer_name
+        ),
+        normalization=(
+            data_defaults.TOKENIZER_NORMALIZATION
+            if tokenizer_normalization is None
+            else tokenizer_normalization
+        ),
+        vocab_size=(
+            data_defaults.TOKENIZER_VOCAB_SIZE
+            if tokenizer_vocab_size is None
+            else tokenizer_vocab_size
+        ),
+        max_subword_length=(
+            data_defaults.TOKENIZER_MAX_SUBWORD_LENGTH
+            if tokenizer_max_subword_length is None
+            else tokenizer_max_subword_length
+        ),
+    )
     train_test = multiple_data_partition(
         DATASETS,
         training_restriction=data_defaults.TRAINING_DOCUMENT_LIMIT,
         testing_restriction=data_defaults.TESTING_DOCUMENT_LIMIT,
-        strict=data_defaults.STRICT_VOCAB,
+        tokenizer=tokenizer,
     )
     timings["Data partition"] = perf_counter() - start
     return train_test
@@ -151,18 +202,11 @@ def build_model_vocab(seed_vocab_model, vocab, timings):
     """Construct the SPA vocabulary used by the Nengo model for this run."""
     spa_vocab = WordsToSPAVocab(vocab)
 
-    if not data_defaults.STRICT_VOCAB:
-        seed_vocab_vectors = {
-            token: seed_vocab_model.wv.get_vector(token)
-            for token in spa_vocab
-            if token != data_defaults.PAD_TOKEN
-        }
-    else:
-        seed_vocab_vectors = {
-            token: seed_vocab_model.wv.get_vector(token)
-            for token in spa_vocab
-            if token not in (data_defaults.PAD_TOKEN, data_defaults.UNKNOWN_TOKEN)
-        }
+    seed_vocab_vectors = {
+        spa_key: seed_vocab_model.wv.get_vector(raw_token)
+        for raw_token, spa_key in zip(vocab, spa_vocab)
+        if raw_token not in (data_defaults.PAD_TOKEN, data_defaults.UNKNOWN_TOKEN)
+    }
 
     # Seed the runtime vocabulary from the Word2Vec model, then add the
     # special vectors the architecture expects explicitly.
@@ -178,6 +222,14 @@ def build_model_vocab(seed_vocab_model, vocab, timings):
 
     for key, pointer in seed_vocab_vectors.items():
         model_vocab.add(key=key, p=pointer)
+
+    # Unknown input must not mutate a live SPA vocabulary with a fresh random
+    # pointer.  A deterministic unit vector gives every tokenizer the same
+    # explicit fallback semantics while remaining distinct from zero padding.
+    unknown_rng = np.random.default_rng(model_defaults.MODEL_SEED)
+    unknown_pointer = unknown_rng.normal(size=model_defaults.VOCAB_DIMENSIONS)
+    unknown_pointer /= np.linalg.norm(unknown_pointer)
+    model_vocab.add(key=data_defaults.UNKNOWN_TOKEN, p=unknown_pointer)
 
     model_vocab.add(
         key=data_defaults.PAD_TOKEN,
@@ -362,6 +414,7 @@ def make_compile_fingerprint(
     opencl_selection=None,
     learned_init_mode=DEFAULT_LEARNED_INIT_MODE,
     learned_init_seed=None,
+    tokenizer=None,
 ):
     """Record the configuration that produced a compile result.
 
@@ -380,6 +433,7 @@ def make_compile_fingerprint(
         "rep_vocab_dim": model_defaults.VOCAB_DIMENSIONS,
         "context_length": model_defaults.CONTEXT_LENGTH,
         "strict_vocab": data_defaults.STRICT_VOCAB,
+        "tokenizer": tokenizer.metadata() if tokenizer is not None else None,
         "sub_lengths": model_result.sub_lengths,
         "sub_lengths_mode": "legacy_deferred",
         "architecture_name": model_result.architecture_spec.name,
@@ -405,6 +459,7 @@ def make_compile_fingerprint(
 def build_runtime(
     model_vocab,
     timings,
+    tokenizer=None,
     opencl_platform_index=None,
     opencl_device_index=None,
     step_time=DEFAULT_STEP_TIME_SECONDS,
@@ -452,6 +507,7 @@ def build_runtime(
         model_result,
         sim,
         model_vocab,
+        tokenizer=tokenizer,
         step_time=step_time,
     )
     compile_profile = make_compile_profile(
@@ -471,6 +527,7 @@ def build_runtime(
         opencl_selection=opencl_selection,
         learned_init_mode=learned_init_mode,
         learned_init_seed=learned_init_seed,
+        tokenizer=tokenizer,
     )
     runtime.set_compile_fingerprint(compile_fingerprint)
     return CompiledRun(
@@ -487,6 +544,10 @@ def print_dry_run_summary(args, workflow, training_config):
     print("\nDry run summary:\n")
     print(f"workflow:                {workflow}")
     print(f"architecture:            {args.architecture}")
+    print(f"tokenizer:               {args.tokenizer}")
+    print(f"tokenizer normalization: {args.tokenizer_normalization}")
+    print(f"tokenizer vocab size:    {args.tokenizer_vocab_size}")
+    print(f"max subword length:      {args.tokenizer_max_subword_length}")
     print(f"checkpoint path:         {args.checkpoint_path}")
     print(f"compile profile:         {args.compile_profile}")
     print(f"learned init mode:       {args.learned_init_mode}")
@@ -519,6 +580,10 @@ def print_checkpoint_metadata(checkpoint_path, full_path, metadata):
 
     print(f"training semantics:      {architecture.get('training_semantics_version')}")
     print(f"vocab dim:               {architecture.get('vocab_dim')}")
+    tokenizer = architecture.get("tokenizer") or {}
+    print(f"tokenizer:               {tokenizer.get('name')}")
+    print(f"tokenizer fingerprint:   {tokenizer.get('fingerprint')}")
+    print(f"vocabulary fingerprint:  {architecture.get('vocabulary_fingerprint')}")
     print(f"context length:          {compile_fingerprint.get('context_length')}")
     print(f"sub_lengths:             {architecture.get('sub_lengths')}")
     print(f"probe mode:              {compile_fingerprint.get('probe_mode')}")
@@ -537,6 +602,7 @@ def compare_architecture_to_checkpoint(
     step_time,
     compile_fingerprint,
     checkpoint_metadata,
+    tokenizer=None,
 ):
     """Compare the current no-compile build signature against checkpoint metadata."""
     current_architecture = build_architecture_signature(
@@ -544,6 +610,7 @@ def compare_architecture_to_checkpoint(
         model_vocab,
         step_time,
         compile_fingerprint=compile_fingerprint,
+        tokenizer_metadata=(tokenizer.metadata() if tokenizer is not None else None),
     )
     saved_architecture = checkpoint_metadata.get("architecture", {})
     return compare_architecture_signatures(saved_architecture, current_architecture)
@@ -563,6 +630,7 @@ def save_build_only_telemetry(
     compile_profile_settings,
     learned_init_mode,
     learned_init_seed,
+    tokenizer=None,
     checkpoint_comparison=None,
 ):
     """Persist telemetry for build-only runs that stop before simulator compile."""
@@ -582,6 +650,7 @@ def save_build_only_telemetry(
         compile_profile,
         learned_init_mode=learned_init_mode,
         learned_init_seed=learned_init_seed,
+        tokenizer=tokenizer,
     )
 
     payload = {
@@ -595,6 +664,7 @@ def save_build_only_telemetry(
             "rep_vocab_dim": model_defaults.VOCAB_DIMENSIONS,
             "probe_mode": model_result.probe_mode,
             "active_context_path": "root_context_module",
+            "tokenizer": tokenizer.metadata() if tokenizer is not None else None,
             **training_config,
         },
         "probes": {
@@ -613,6 +683,9 @@ def save_build_only_telemetry(
             model_vocab,
             training_config["step_time"],
             compile_fingerprint=compile_fingerprint,
+            tokenizer_metadata=(
+                tokenizer.metadata() if tokenizer is not None else None
+            ),
         ),
     }
     if checkpoint_comparison is not None:
@@ -722,6 +795,9 @@ def save_run_telemetry(context):
             "testing_restriction": data_defaults.TESTING_DOCUMENT_LIMIT,
             "active_context_path": "root_context_module",
             "evaluation_mode": "streaming",
+            "tokenizer": (
+                runtime.tokenizer.metadata() if runtime.tokenizer is not None else None
+            ),
             **runtime.training_configuration(),
         },
         "probes": {
@@ -809,8 +885,15 @@ def run_application(args):
             if not args.build_only:
                 return
 
-    seed_vocab_model = load_seed_vocab_model()
-    train_test = build_train_test(timings)
+    train_test = build_train_test(
+        timings,
+        tokenizer_name=args.tokenizer,
+        tokenizer_normalization=args.tokenizer_normalization,
+        tokenizer_vocab_size=args.tokenizer_vocab_size,
+        tokenizer_max_subword_length=args.tokenizer_max_subword_length,
+    )
+    tokenizer = train_test.tokenizer
+    seed_vocab_model = load_seed_vocab_model(tokenizer, train_test.training_set)
     model_vocab = build_model_vocab(seed_vocab_model, train_test.vocab, timings)
 
     if args.build_only:
@@ -840,6 +923,7 @@ def run_application(args):
                 training_config["step_time"],
                 build_only_fingerprint,
                 checkpoint_metadata,
+                tokenizer=tokenizer,
             )
             if checkpoint_metadata is not None and args.compare_current_architecture
             else None
@@ -854,6 +938,7 @@ def run_application(args):
                 compile_profile_settings=compile_profile_config["settings"],
                 learned_init_mode=args.learned_init_mode,
                 learned_init_seed=args.learned_init_seed,
+                tokenizer=tokenizer,
                 checkpoint_comparison=comparison,
             )
         else:
@@ -870,6 +955,7 @@ def run_application(args):
     compiled = build_runtime(
         model_vocab,
         timings,
+        tokenizer=tokenizer,
         opencl_platform_index=args.opencl_platform_index,
         opencl_device_index=args.opencl_device_index,
         step_time=training_config["step_time"],

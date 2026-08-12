@@ -4,6 +4,7 @@ import argparse
 
 from architecture.variants import DEFAULT_ARCHITECTURE_NAME, available_architectures
 from components.runtime import DEFAULT_TRAINING_MODE, VALID_TRAINING_MODES
+from config import data_defaults
 from utils.build_config import (
     DEFAULT_COMPILE_PROFILE_NAME,
     DEFAULT_LEARNED_INIT_MODE,
@@ -12,6 +13,7 @@ from utils.build_config import (
     validate_learned_init_configuration,
 )
 from utils.probes import DEFAULT_PROBE_MODE, VALID_PROBE_MODES
+from utils.tokenization import available_tokenizers
 
 BENCHMARK_MODE_MAP = {
     "compile-current": "current",
@@ -120,6 +122,33 @@ def parse_args():
             "Named subsystem architecture to assemble. Architecture changes "
             "may be checkpoint-incompatible with the default baseline."
         ),
+    )
+    parser.add_argument(
+        "--tokenizer",
+        choices=available_tokenizers(),
+        default=data_defaults.TOKENIZER_NAME,
+        help=(
+            "Versioned text-tokenization strategy. Changing it changes neural "
+            "timesteps, seed-vocabulary caches, and checkpoint compatibility."
+        ),
+    )
+    parser.add_argument(
+        "--tokenizer-vocab-size",
+        type=int,
+        default=data_defaults.TOKENIZER_VOCAB_SIZE,
+        help="Vocabulary budget for learned BPE and unigram profiles.",
+    )
+    parser.add_argument(
+        "--tokenizer-normalization",
+        choices=("NFC", "NFKC"),
+        default=data_defaults.TOKENIZER_NORMALIZATION,
+        help="Unicode normalization applied before every tokenizer profile.",
+    )
+    parser.add_argument(
+        "--tokenizer-max-subword-length",
+        type=int,
+        default=data_defaults.TOKENIZER_MAX_SUBWORD_LENGTH,
+        help="Maximum grapheme length of candidate unigram pieces.",
     )
     parser.add_argument(
         "--force-retrain",
@@ -302,6 +331,10 @@ def parse_args():
 
     if args.benchmark_repeats < 1:
         parser.error("--benchmark-repeats must be at least 1.")
+    if args.tokenizer_vocab_size < 1:
+        parser.error("--tokenizer-vocab-size must be at least 1.")
+    if args.tokenizer_max_subword_length < 1:
+        parser.error("--tokenizer-max-subword-length must be at least 1.")
 
     return args
 

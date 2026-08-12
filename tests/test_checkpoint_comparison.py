@@ -90,6 +90,25 @@ class CheckpointComparisonTests(unittest.TestCase):
         self.assertEqual(comparison["mismatches"][0]["field"], "architecture_topology")
         self.assertEqual(comparison["mismatches"][0]["category"], "structural")
 
+    def test_categorizes_tokenizer_and_vocabulary_changes(self):
+        saved = {
+            "tokenizer": {"name": "word-v1", "fingerprint": "old"},
+            "vocabulary_fingerprint": "vocab-old",
+        }
+        current = {
+            "tokenizer": {"name": "bpe-v1", "fingerprint": "new"},
+            "vocabulary_fingerprint": "vocab-new",
+        }
+
+        comparison = compare_architecture_signatures(saved, current)
+        categories = {
+            mismatch["field"]: mismatch["category"]
+            for mismatch in comparison["mismatches"]
+        }
+
+        self.assertEqual(categories["tokenizer"], "tokenization")
+        self.assertEqual(categories["vocabulary_fingerprint"], "tokenization")
+
     def test_rejects_composable_topology_without_component_build_order(self):
         saved = {
             "architecture_topology": {
