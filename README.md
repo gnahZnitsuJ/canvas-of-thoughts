@@ -152,6 +152,32 @@ different checkpoint compatibility and initial learning conditions. Use
 `-ShowOnly` to inspect a workflow without executing it and pass additional model
 arguments after the wrapper options when needed.
 
+## Testing
+
+Run the hermetic automated suite from the repository root:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+The suite combines independently derived behavioral contracts with focused
+regression tests. The accepted-contract modules use hand-calculated examples,
+state-recording fakes, boundary values, exact JSON round trips, and public CLI
+outcomes rather than reproducing implementation tables or call transcripts.
+
+For a quick check that important pure-contract tests can actually detect
+plausible faults, run the deterministic mutation sentinels:
+
+```bash
+python scripts/verify_test_sentinels.py
+```
+
+The script copies only the required source and tests into a temporary directory,
+applies seven exact mutations, and requires the owning tests to fail. It never
+mutates the working tree. These sentinels cover architecture contracts and
+telemetry comparison logic; they do not replace Nengo build, simulator, OpenCL,
+checkpoint, or scientific-quality validation.
+
 ## Comparing Telemetry
 
 Compare any two or more compile, run, or build-only telemetry files without

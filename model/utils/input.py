@@ -28,9 +28,13 @@ class InputModule:
         """Emit either the buffered vector or the current scheduled token."""
         if self.schedule_vectors is not None:
             elapsed = t - self.schedule_start_time
-            index = int(
-                np.floor((elapsed + 1e-12) / self.schedule_token_duration)
-            )
+            if elapsed < 0:
+                return np.zeros(self.dim)
+
+            # A schedule is a sequence of exact half-open windows. Adding an
+            # epsilon here leaks values before the start and advances values
+            # just before later boundaries.
+            index = int(np.floor(elapsed / self.schedule_token_duration))
 
             if 0 <= index < len(self.schedule_vectors):
                 return self.schedule_vectors[index]

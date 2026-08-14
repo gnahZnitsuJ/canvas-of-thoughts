@@ -34,6 +34,9 @@ def evaluate_model_prefix_replay(runtime, test_sequences, max_examples=50, top_k
     total = 0
 
     print("\nEvaluating model with prefix replay...")
+    if max_examples <= 0:
+        print("\nTest Accuracy (top-1, 0 samples): 0.000")
+        return 0.0
 
     for tokens in test_sequences:
         if len(tokens) < 2:
@@ -74,6 +77,16 @@ def evaluate_model_streaming_metrics(
     top_k=3,
 ):
     """Compute richer streaming metrics for calibration and comparisons."""
+    topk_key = f"top{top_k}_accuracy"
+    if max_examples <= 0:
+        return {
+            "total": 0,
+            "top1_accuracy": 0.0,
+            topk_key: 0.0,
+            "mean_target_similarity": 0.0,
+            "mean_top_score": 0.0,
+        }
+
     correct_top1 = 0
     correct_topk = 0
     total = 0
@@ -112,7 +125,6 @@ def evaluate_model_streaming_metrics(
         if total >= max_examples:
             break
 
-    topk_key = f"top{top_k}_accuracy"
     return {
         "total": total,
         "top1_accuracy": correct_top1 / total if total else 0.0,
