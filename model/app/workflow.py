@@ -30,16 +30,23 @@ from components.runtime import (
     format_architecture_comparison,
     inspect_checkpoint_metadata,
 )
-from config import data_defaults, model_defaults
+from config import cache_defaults, data_defaults, model_defaults
 from config.runtime_defaults import DEFAULT_STEP_TIME_SECONDS
 from utils import seed_vocab
 from utils.build_config import (
     DEFAULT_COMPILE_PROFILE_NAME,
     DEFAULT_LEARNED_INIT_MODE,
+    DEFAULT_LEARNED_INIT_SEED,
     compile_profile_scope,
     resolve_compile_profile,
 )
 from utils.calibration import calibrate_token_duration
+from utils.decoder_cache import (
+    create_decoder_cache,
+    format_decoder_cache_summary,
+    inspect_decoder_cache,
+    make_backend_build_model,
+)
 from utils.eval import evaluate_model
 from utils.input import make_unitary
 from utils.opencl import print_opencl_selection, select_opencl_device
@@ -84,6 +91,7 @@ class CompiledRun:
     opencl_selection: dict
     compile_profile: dict
     compile_fingerprint: dict
+    decoder_cache: dict | None = None
 
     @property
     def platform(self):
@@ -303,7 +311,7 @@ def build_model_result(
     probe_mode=DEFAULT_PROBE_MODE,
     compile_profile_name=DEFAULT_COMPILE_PROFILE_NAME,
     learned_init_mode=DEFAULT_LEARNED_INIT_MODE,
-    learned_init_seed=None,
+    learned_init_seed=DEFAULT_LEARNED_INIT_SEED,
     architecture_name=DEFAULT_ARCHITECTURE_NAME,
 ):
     """Build the Python-side Nengo model without compiling a simulator."""
@@ -326,7 +334,7 @@ def build_model_result(
     return model_result, compile_profile_config
 
 
-def construct_simulator(model, context, profile_compile=False):
+def construct_simulator(model, context, profile_compile=False, build_model=None):
     """Construct the simulator, optionally wrapping the build in cProfile."""
     profile_output_path = None
 
@@ -337,6 +345,7 @@ def construct_simulator(model, context, profile_compile=False):
         try:
             simulator = nengo_ocl.Simulator(
                 model,
+                model=build_model,
                 context=context,
                 progress_bar=False,
             )
@@ -350,6 +359,7 @@ def construct_simulator(model, context, profile_compile=False):
     start = perf_counter()
     simulator = nengo_ocl.Simulator(
         model,
+        model=build_model,
         context=context,
         progress_bar=False,
     )
@@ -413,7 +423,7 @@ def make_compile_fingerprint(
     *,
     opencl_selection=None,
     learned_init_mode=DEFAULT_LEARNED_INIT_MODE,
-    learned_init_seed=None,
+    learned_init_seed=DEFAULT_LEARNED_INIT_SEED,
     tokenizer=None,
 ):
     """Record the configuration that produced a compile result.
@@ -468,8 +478,9 @@ def build_runtime(
     probe_mode=DEFAULT_PROBE_MODE,
     compile_profile_name=DEFAULT_COMPILE_PROFILE_NAME,
     learned_init_mode=DEFAULT_LEARNED_INIT_MODE,
-    learned_init_seed=None,
+    learned_init_seed=DEFAULT_LEARNED_INIT_SEED,
     architecture_name=DEFAULT_ARCHITECTURE_NAME,
+    decoder_cache_mode=cache_defaults.DEFAULT_DECODER_CACHE_MODE,
 ):
     """Build the model, select an OpenCL device, and compile the simulator."""
     model_result, compile_profile_config = build_model_result(
@@ -491,12 +502,23 @@ def build_runtime(
     device = opencl_selection["device"]
     context = opencl_selection["context"]
 
+    decoder_cache = create_decoder_cache(
+        decoder_cache_mode,
+        learning_connections=model_result.learning_connections,
+        learning_connection_metadata=model_result.learning_connection_metadata,
+    )
+    build_model = make_backend_build_model("nengo_ocl", decoder_cache)
+
     sim, simulator_construct_seconds, profile_output_path = construct_simulator(
         model_result.model,
         context,
         profile_compile=profile_compile,
+        build_model=build_model,
     )
     timings["Simulator compile"] = simulator_construct_seconds
+    decoder_cache.finalize_after_build()
+    decoder_cache_telemetry = decoder_cache.telemetry()
+    print("\n" + format_decoder_cache_summary(decoder_cache_telemetry))
 
     if first_run_warmup:
         warmup_start = perf_counter()
@@ -536,6 +558,7 @@ def build_runtime(
         opencl_selection=opencl_selection,
         compile_profile=compile_profile,
         compile_fingerprint=compile_fingerprint,
+        decoder_cache=decoder_cache_telemetry,
     )
 
 
@@ -552,6 +575,7 @@ def print_dry_run_summary(args, workflow, training_config):
     print(f"compile profile:         {args.compile_profile}")
     print(f"learned init mode:       {args.learned_init_mode}")
     print(f"learned init seed:       {args.learned_init_seed}")
+    print(f"decoder cache mode:      {args.decoder_cache_mode}")
     print(f"probe mode:              {args.probe_mode}")
     print(f"telemetry enabled:       {not args.no_telemetry}")
     print(f"training mode:           {training_config['training_mode']}")
@@ -808,6 +832,7 @@ def save_run_telemetry(context):
         "timings_seconds": context.timings,
         "compile_profile": compiled.compile_profile,
         "compile_fingerprint": compiled.compile_fingerprint,
+        "decoder_cache": compiled.decoder_cache,
         "complexity": complexity,
         "invocation_estimates": invocation_estimates,
         "actual_simulator_invocations": {
@@ -844,6 +869,10 @@ def run_application(args):
     """Execute a resolved non-benchmark CLI workflow."""
     workflow_plan = resolve_workflow(args)
     timings = {}
+
+    if getattr(args, "inspect_decoder_cache", False):
+        print("\n" + format_decoder_cache_summary(inspect_decoder_cache()))
+        return
 
     runtime_profile = load_requested_runtime_profile(args.use_runtime_profile)
     training_config = resolve_training_configuration(args, runtime_profile)
@@ -966,6 +995,11 @@ def run_application(args):
         learned_init_mode=args.learned_init_mode,
         learned_init_seed=args.learned_init_seed,
         architecture_name=args.architecture,
+        decoder_cache_mode=getattr(
+            args,
+            "decoder_cache_mode",
+            cache_defaults.DEFAULT_DECODER_CACHE_MODE,
+        ),
     )
     runtime = compiled.runtime
     runtime.configure_training(

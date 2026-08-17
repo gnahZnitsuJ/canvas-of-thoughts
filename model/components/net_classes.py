@@ -5,7 +5,11 @@ import nengo_spa as spa
 from nengo_spa.network import Network
 import numpy as np
 from config import data_defaults, model_defaults
-from utils.build_config import DEFAULT_LEARNED_INIT_MODE, make_learned_connection
+from utils.build_config import (
+    DEFAULT_LEARNED_INIT_MODE,
+    DEFAULT_LEARNED_INIT_SEED,
+    make_learned_connection,
+)
 from utils.probes import ProbeRegistry
 
 
@@ -24,7 +28,7 @@ class BaseComponent(Network):
         context_sub_length=model_defaults.CONTEXT_LENGTH,
         strict=data_defaults.STRICT_VOCAB,
         learned_init_mode=DEFAULT_LEARNED_INIT_MODE,
-        learned_init_seed=None,
+        learned_init_seed=DEFAULT_LEARNED_INIT_SEED,
     ):
         super().__init__(label=label, seed=seed)
         probe_registry = probe_registry or ProbeRegistry()

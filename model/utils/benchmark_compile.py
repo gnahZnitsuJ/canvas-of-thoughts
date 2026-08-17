@@ -20,10 +20,11 @@ import numpy as np
 import components.net_comp as nc
 import components.net_classes as ncls
 from architecture.variants import DEFAULT_ARCHITECTURE_NAME, available_architectures
-from config import data_defaults, model_defaults
+from config import cache_defaults, data_defaults, model_defaults
 from utils.build_config import (
     DEFAULT_COMPILE_PROFILE_NAME,
     DEFAULT_LEARNED_INIT_MODE,
+    DEFAULT_LEARNED_INIT_SEED,
     LEARNED_INIT_MODES,
     available_compile_profiles,
     compile_profile_scope,
@@ -31,6 +32,7 @@ from utils.build_config import (
     validate_learned_init_configuration,
 )
 from utils.input import InputModule
+from utils.decoder_cache import create_decoder_cache, make_backend_build_model
 from utils.opencl import print_opencl_selection, select_opencl_device
 from utils.probes import DEFAULT_PROBE_MODE, VALID_PROBE_MODES
 from utils.telemetry import (
@@ -80,10 +82,11 @@ def compile_case(
     *,
     compile_profile_name=DEFAULT_COMPILE_PROFILE_NAME,
     learned_init_mode=DEFAULT_LEARNED_INIT_MODE,
-    learned_init_seed=None,
+    learned_init_seed=DEFAULT_LEARNED_INIT_SEED,
     include_first_run_warmup=False,
     repeat_index=None,
     architecture_name=DEFAULT_ARCHITECTURE_NAME,
+    decoder_cache_mode=cache_defaults.DEFAULT_DECODER_CACHE_MODE,
 ):
     vocab = make_vocab(dimensions)
     compile_profile = resolve_compile_profile(compile_profile_name)
@@ -103,19 +106,29 @@ def compile_case(
         )
     model_build_seconds = perf_counter() - start
 
+    decoder_cache = create_decoder_cache(
+        decoder_cache_mode,
+        learning_connections=model_result.learning_connections,
+        learning_connection_metadata=model_result.learning_connection_metadata,
+    )
+    build_model = make_backend_build_model(simulator_name, decoder_cache)
+
     start = perf_counter()
     if simulator_name == "nengo":
         simulator = nengo.Simulator(
             model_result.model,
+            model=build_model,
             progress_bar=False,
         )
     else:
         simulator = nengo_ocl.Simulator(
             model_result.model,
+            model=build_model,
             context=context,
             progress_bar=False,
         )
     simulator_compile_seconds = perf_counter() - start
+    decoder_cache.finalize_after_build()
     first_run_warmup_seconds = (
         run_first_step_warmup(simulator)
         if include_first_run_warmup
@@ -140,6 +153,7 @@ def compile_case(
         "first_run_warmup_seconds": first_run_warmup_seconds,
         "network": network_telemetry(model_result.model),
         "operators": operator_telemetry(simulator),
+        "decoder_cache": decoder_cache.telemetry(),
         "probes": {
             "mode": model_result.probe_mode,
             "created_labels": model_result.created_probe_labels,
@@ -162,6 +176,7 @@ def component_case(
     context,
     *,
     compile_profile_name=DEFAULT_COMPILE_PROFILE_NAME,
+    decoder_cache_mode=cache_defaults.DEFAULT_DECODER_CACHE_MODE,
 ):
     vocab = make_vocab(dimensions)
     compile_profile = resolve_compile_profile(compile_profile_name)
@@ -170,16 +185,25 @@ def component_case(
         network = builder(vocab)
     model_build_seconds = perf_counter() - start
 
+    decoder_cache = create_decoder_cache(decoder_cache_mode)
+    build_model = make_backend_build_model(simulator_name, decoder_cache)
+
     start = perf_counter()
     if simulator_name == "nengo":
-        simulator = nengo.Simulator(network, progress_bar=False)
+        simulator = nengo.Simulator(
+            network,
+            model=build_model,
+            progress_bar=False,
+        )
     else:
         simulator = nengo_ocl.Simulator(
             network,
+            model=build_model,
             context=context,
             progress_bar=False,
         )
     simulator_compile_seconds = perf_counter() - start
+    decoder_cache.finalize_after_build()
 
     result = {
         "name": name,
@@ -190,6 +214,7 @@ def component_case(
         "simulator_compile_seconds": simulator_compile_seconds,
         "network": network_telemetry(network),
         "operators": operator_telemetry(simulator),
+        "decoder_cache": decoder_cache.telemetry(),
     }
     simulator.close()
     return result
@@ -199,7 +224,7 @@ def build_base_component(
     vocab,
     *,
     learned_init_mode=DEFAULT_LEARNED_INIT_MODE,
-    learned_init_seed=None,
+    learned_init_seed=DEFAULT_LEARNED_INIT_SEED,
 ):
     with spa.Network(seed=model_defaults.MODEL_SEED) as network:
         context = InputModule(vocab.dimensions)
@@ -221,10 +246,11 @@ def benchmark(
     probe_mode=DEFAULT_PROBE_MODE,
     compile_profile_name=DEFAULT_COMPILE_PROFILE_NAME,
     learned_init_mode=DEFAULT_LEARNED_INIT_MODE,
-    learned_init_seed=None,
+    learned_init_seed=DEFAULT_LEARNED_INIT_SEED,
     repeats=2,
     include_first_run_warmup=False,
     architecture_name=DEFAULT_ARCHITECTURE_NAME,
+    decoder_cache_mode=cache_defaults.DEFAULT_DECODER_CACHE_MODE,
 ):
     if mode not in BENCHMARK_MODES:
         raise ValueError(f"Unknown benchmark mode: {mode}")
@@ -237,6 +263,14 @@ def benchmark(
     platform = opencl_selection["platform"]
     device = opencl_selection["device"]
     context = opencl_selection["context"]
+
+    # Refresh is an invocation-level action. Clear once, then allow later cases
+    # (especially repeat-current) to demonstrate reuse within this benchmark.
+    if decoder_cache_mode == "refresh":
+        create_decoder_cache("refresh")
+        effective_decoder_cache_mode = "auto"
+    else:
+        effective_decoder_cache_mode = decoder_cache_mode
 
     scaling_cases = [
         ("baseline", [1, 20], 64),
@@ -264,6 +298,7 @@ def benchmark(
                 learned_init_mode=learned_init_mode,
                 learned_init_seed=learned_init_seed,
                 architecture_name=architecture_name,
+                decoder_cache_mode=effective_decoder_cache_mode,
             )
             for name, sub_lengths, dimensions in scaling_cases
         ]
@@ -280,6 +315,7 @@ def benchmark(
                 learned_init_mode=learned_init_mode,
                 learned_init_seed=learned_init_seed,
                 architecture_name=architecture_name,
+                decoder_cache_mode=effective_decoder_cache_mode,
             )
             for simulator in ("nengo", "nengo_ocl")
         ]
@@ -296,6 +332,7 @@ def benchmark(
                 learned_init_mode=learned_init_mode,
                 learned_init_seed=learned_init_seed,
                 architecture_name=architecture_name,
+                decoder_cache_mode=effective_decoder_cache_mode,
             )
         ]
     elif mode == "repeat-current":
@@ -313,6 +350,7 @@ def benchmark(
                 include_first_run_warmup=include_first_run_warmup,
                 repeat_index=repeat_index,
                 architecture_name=architecture_name,
+                decoder_cache_mode=effective_decoder_cache_mode,
             )
             for repeat_index in range(repeats)
         ]
@@ -340,6 +378,7 @@ def benchmark(
                 simulator,
                 context,
                 compile_profile_name=compile_profile_name,
+                decoder_cache_mode=effective_decoder_cache_mode,
             )
             for simulator in ("nengo", "nengo_ocl")
             for name, builder in component_builders
@@ -359,6 +398,8 @@ def benchmark(
         "learned_init_mode": learned_init_mode,
         "learned_init_seed": learned_init_seed,
         "architecture_name": architecture_name,
+        "decoder_cache_mode": decoder_cache_mode,
+        "decoder_cache_refresh_performed": decoder_cache_mode == "refresh",
         "scaling": scaling,
         "simulator_comparison": simulator_comparison,
         "component_costs": component_costs,
@@ -429,7 +470,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--learned-init-seed",
         type=int,
-        help="Optional seed for deterministic learned-connection initialization.",
+        default=DEFAULT_LEARNED_INIT_SEED,
+        help="Seed for deterministic learned-connection initialization.",
+    )
+    parser.add_argument(
+        "--decoder-cache-mode",
+        choices=cache_defaults.DECODER_CACHE_MODES,
+        default=cache_defaults.DEFAULT_DECODER_CACHE_MODE,
+        help="Persistent decoder-cache reuse policy.",
     )
     parser.add_argument(
         "--repeats",
@@ -463,4 +511,5 @@ if __name__ == "__main__":
         repeats=args.repeats,
         include_first_run_warmup=args.include_first_run_warmup,
         architecture_name=args.architecture,
+        decoder_cache_mode=args.decoder_cache_mode,
     )

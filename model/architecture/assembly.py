@@ -30,6 +30,7 @@ class AssembledModelResult:
     roles: dict[str, Any]
     capabilities: dict[str, list[Any]]
     learning_connections: list[Any]
+    learning_connection_metadata: list[dict[str, Any]]
     probes: dict[str, Any]
     architecture_topology_signature: dict[str, Any]
     strict: bool
@@ -174,6 +175,22 @@ def assemble_architecture(
         for component in checkpoint_components
         for connection in component.learning_connections
     ]
+    learning_connection_metadata = [
+        {
+            "stable_id": f"{component.name}.learning_connection_{index}",
+            "component": component.name,
+            "component_type": component.signature.get("type"),
+            "learned_init_mode": context.learned_init_mode,
+            "effective_seed": (
+                None
+                if context.learned_init_seed is None
+                else context.learned_init_seed
+                + int(component.signature.get("learned_init_seed_offset", 0))
+            ),
+        }
+        for component in checkpoint_components
+        for index, _connection in enumerate(component.learning_connections)
+    ]
     probes = {
         f"{component.name}.{name}": probe
         for component in built_components.values()
@@ -189,6 +206,7 @@ def assemble_architecture(
         roles=roles,
         capabilities=_aggregate_capabilities(built_components),
         learning_connections=learning_connections,
+        learning_connection_metadata=learning_connection_metadata,
         probes=probes,
         architecture_topology_signature=architecture_signature(spec, built_components),
         strict=context.strict_vocab,

@@ -5,7 +5,11 @@ from architecture.adapters import default_component_registry
 from architecture.contracts import ArchitectureBuildContext
 from architecture.variants import DEFAULT_ARCHITECTURE_NAME, architecture_spec
 from config import data_defaults, model_defaults
-from utils.build_config import DEFAULT_COMPILE_PROFILE_NAME, DEFAULT_LEARNED_INIT_MODE
+from utils.build_config import (
+    DEFAULT_COMPILE_PROFILE_NAME,
+    DEFAULT_LEARNED_INIT_MODE,
+    DEFAULT_LEARNED_INIT_SEED,
+)
 from utils.probes import DEFAULT_PROBE_MODE, ProbeRegistry
 
 
@@ -19,7 +23,7 @@ def Model(
     strict=data_defaults.STRICT_VOCAB,
     probe_mode=DEFAULT_PROBE_MODE,
     learned_init_mode=DEFAULT_LEARNED_INIT_MODE,
-    learned_init_seed=None,
+    learned_init_seed=DEFAULT_LEARNED_INIT_SEED,
     compile_profile_name=DEFAULT_COMPILE_PROFILE_NAME,
     compile_profile_settings=None,
     architecture_name=DEFAULT_ARCHITECTURE_NAME,

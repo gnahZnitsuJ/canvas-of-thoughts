@@ -4,10 +4,11 @@ import argparse
 
 from architecture.variants import DEFAULT_ARCHITECTURE_NAME, available_architectures
 from components.runtime import DEFAULT_TRAINING_MODE, VALID_TRAINING_MODES
-from config import data_defaults
+from config import cache_defaults, data_defaults
 from utils.build_config import (
     DEFAULT_COMPILE_PROFILE_NAME,
     DEFAULT_LEARNED_INIT_MODE,
+    DEFAULT_LEARNED_INIT_SEED,
     LEARNED_INIT_MODES,
     available_compile_profiles,
     validate_learned_init_configuration,
@@ -70,6 +71,11 @@ def parse_args():
         "--inspect-checkpoint",
         action="store_true",
         help="Inspect checkpoint metadata without compiling the simulator.",
+    )
+    parser.add_argument(
+        "--inspect-decoder-cache",
+        action="store_true",
+        help="Inspect the persistent decoder cache without building a simulator.",
     )
     parser.add_argument(
         "--compare-current-architecture",
@@ -228,7 +234,20 @@ def parse_args():
     parser.add_argument(
         "--learned-init-seed",
         type=int,
-        help="Optional deterministic seed for learned-connection initialization experiments.",
+        default=DEFAULT_LEARNED_INIT_SEED,
+        help=(
+            "Seed for learned-connection initialization. The deterministic "
+            "default enables decoder reuse across sessions."
+        ),
+    )
+    parser.add_argument(
+        "--decoder-cache-mode",
+        choices=cache_defaults.DECODER_CACHE_MODES,
+        default=cache_defaults.DEFAULT_DECODER_CACHE_MODE,
+        help=(
+            "Persistent decoder-cache policy: reuse automatically, refresh the "
+            "Canvas cache, or disable cache reads and writes."
+        ),
     )
     parser.add_argument(
         "--probe-mode",

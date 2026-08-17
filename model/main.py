@@ -27,6 +27,7 @@ def main():
             architecture_name=args.architecture,
             repeats=args.benchmark_repeats,
             include_first_run_warmup=args.include_first_run_warmup,
+            decoder_cache_mode=args.decoder_cache_mode,
         )
         return
 

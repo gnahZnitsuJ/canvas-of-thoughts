@@ -26,6 +26,7 @@ CONTROL_FIELDS = (
     "compile_profile.settings",
     "learned_init.mode",
     "learned_init.seed",
+    "decoder_cache.mode",
     "tokenizer.name",
     "tokenizer.fingerprint",
 )
@@ -41,11 +42,16 @@ METRIC_FIELDS = (
     "connection_count",
     "probe_count",
     "operator_count",
+    "decoder_cache.reused_solver_calls",
+    "decoder_cache.solved_solver_calls",
+    "decoder_cache.reuse_seconds",
+    "decoder_cache.solve_seconds",
 )
 
 GROUPS = {
     "compile_profile": {"compile_profile.name", "compile_profile.settings"},
     "learned_init": {"learned_init.mode", "learned_init.seed"},
+    "decoder_cache": {"decoder_cache.mode"},
     "tokenizer": {"tokenizer.name", "tokenizer.fingerprint"},
     "source": {"source.commit", "source.dirty", "source.snapshot"},
     "opencl": {"opencl.platform", "opencl.device"},
@@ -120,6 +126,9 @@ def normalize(document, path):
             document, "complexity.operators", default={}
         )
         timings = document.get("timings_seconds", {})
+        decoder_cache = case.get("decoder_cache") or document.get(
+            "decoder_cache", {}
+        )
         repeat_index = case.get("repeat_index")
         suffix = f"#{repeat_index}" if repeat_index is not None else ""
 
@@ -165,6 +174,8 @@ def normalize(document, path):
             "learned_init.seed": case.get("learned_init_seed")
             if "learned_init_seed" in case
             else document.get("learned_init_seed", fingerprint.get("learned_init_seed")),
+            "decoder_cache.mode": decoder_cache.get("mode")
+            or document.get("decoder_cache_mode"),
             "tokenizer.name": tokenizer.get("name"),
             "tokenizer.fingerprint": tokenizer.get("fingerprint"),
             "model_build_seconds": case.get("model_build_seconds")
@@ -186,6 +197,14 @@ def normalize(document, path):
             "connection_count": network.get("connection_count"),
             "probe_count": network.get("probe_count"),
             "operator_count": operators.get("operator_count"),
+            "decoder_cache.reused_solver_calls": decoder_cache.get(
+                "reused_solver_calls"
+            ),
+            "decoder_cache.solved_solver_calls": decoder_cache.get(
+                "solved_solver_calls"
+            ),
+            "decoder_cache.reuse_seconds": decoder_cache.get("reuse_seconds"),
+            "decoder_cache.solve_seconds": decoder_cache.get("solve_seconds"),
             "warnings": _json_value(document.get("warnings", [])),
             "cache_state": _json_value(
                 _first(
@@ -588,7 +607,7 @@ def parse_args(argv=None):
         default=[],
         help=(
             "Declare an intended independent variable. Groups: compile_profile, "
-            "learned_init, tokenizer, source, opencl, architecture; or use an "
+            "learned_init, decoder_cache, tokenizer, source, opencl, architecture; or use an "
             "exact field."
         ),
     )

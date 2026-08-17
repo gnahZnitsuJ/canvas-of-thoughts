@@ -47,6 +47,7 @@ python model/main.py --build-only --probe-mode minimal --compile-profile fast-so
 python model/main.py --inspect-checkpoint --checkpoint-path reuters_checkpoint.pkl
 python model/main.py --build-only --inspect-checkpoint --compare-current-architecture
 python model/main.py --dry-run --tokenizer bpe-v1
+python model/main.py --inspect-decoder-cache
 ```
 
 - `python model/main.py --train --no-eval --no-demo --no-interactive`
@@ -91,6 +92,33 @@ python model/main.py --dry-run --tokenizer bpe-v1
   selects a versioned tokenizer profile. Available profiles are `word-v1`,
   `bpe-v1`, `unigram-v1`, `character-v1`, and `byte-v1`. Tokenizer changes use
   independent seed-vector caches and are checkpoint-incompatible by design.
+- `python model/main.py --inspect-decoder-cache`
+  reports the persistent Nengo decoder-cache path, dependency namespace, size,
+  and file count without loading data or constructing a simulator.
+
+### Persistent decoder solves
+
+Scientific `random-function` builds now use the committed learned-initialization
+seed (`42`) and Nengo's exact disk decoder cache. The first compatible build
+performs the normal full solves; later processes and machine restarts reuse the
+stored decoder arrays instead of solving them again. Nengo's numerical cache key
+remains authoritative, so changes to solver inputs, evaluation points, targets,
+or RNG state produce a cache miss and a fresh solve. Canvas also verifies the
+stored decoder shape, dtype, and SHA-256 digest before accepting a reuse hit.
+
+Canvas keeps these generated artifacts outside the OneDrive checkout in a
+project-specific, dependency-versioned machine-local directory. The default
+cache budget is 4 GiB. Set `CANVAS_DECODER_CACHE_DIR` to relocate the root.
+This decoder state is independent of PES training checkpoints: the cache holds
+the initialized NEF solves, while checkpoints hold learned runtime weights.
+
+Use `--decoder-cache-mode refresh` to clear and rebuild the active Canvas
+dependency namespace, or `--decoder-cache-mode off` for a controlled run that
+neither reads nor writes decoder artifacts. Normal and benchmark telemetry
+records solver reuse/solve counts and per-learned-connection outcomes. Because
+the deterministic default establishes a new canonical initialization, older
+checkpoints whose learned-init seed was recorded as `None` are intentionally
+checkpoint-incompatible.
 
 Compare how profiles segment representative text without building Nengo:
 
@@ -205,6 +233,8 @@ Useful flags:
   build the Python Nengo model and stop before simulator compilation
 - `--inspect-checkpoint`
   inspect checkpoint metadata without building or compiling the model
+- `--inspect-decoder-cache`
+  inspect persistent decoder-cache location and storage without building or compiling the model
 - `--compare-current-architecture`
   with `--build-only --inspect-checkpoint`, compare checkpoint metadata against the current build signature
 - `--checkpoint-path PATH`
@@ -228,7 +258,9 @@ Useful flags:
 - `--learned-init-mode random-function|zero-nosolver|seeded-nosolver`
   choose how PES-learned decoded connections are initialized for compile/workflow experiments
 - `--learned-init-seed N`
-  provide a deterministic seed for seeded learned-connection initialization
+  override the deterministic learned-connection seed (default `42`); changes invalidate decoder reuse and checkpoint compatibility
+- `--decoder-cache-mode auto|refresh|off`
+  reuse compatible decoder solves, clear and regenerate the active Canvas cache namespace, or bypass cache reads and writes
 - `--max-examples N`
   cap how many evaluation examples are processed
 - `--max-demo-examples N`
@@ -301,11 +333,13 @@ run `/reset`, so sequence boundaries remain explicit.
 
 Telemetry is written locally to `model/results/` as timestamped `telemetry_*.json` files.
 These files now include aggregate simulator activity plus explicit
-`present_calls` and `reset_context_calls`. Use `--no-telemetry` to skip this
+`present_calls`, `reset_context_calls`, and decoder-cache reuse/solve outcomes.
+Use `--no-telemetry` to skip this
 recording when you want the leanest run possible.
 
 OpenCL selection can also be controlled through environment variables:
 - `CANVAS_OPENCL_PLATFORM_INDEX`
 - `CANVAS_OPENCL_DEVICE_INDEX`
+- `CANVAS_DECODER_CACHE_DIR`
 
 CLI flags take precedence over those environment defaults.
