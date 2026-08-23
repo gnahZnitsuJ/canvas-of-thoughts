@@ -27,9 +27,15 @@ expensive build:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip check
-.\.venv\Scripts\python.exe -c "import pyopencl as cl; print([p.name for p in cl.get_platforms()])"
+.\.venv\Scripts\python.exe model/main.py --check-environment
 .\.venv\Scripts\python.exe model/main.py --dry-run
 ```
+
+`--check-environment` verifies every direct package and pinned version, imports
+the installed modules, runs `pip check`, loads the Reuters corpus, and enumerates
+OpenCL devices.
+Normal model runs perform only a lightweight missing-package bootstrap check;
+corpus and OpenCL failures are checked when those resources are first used.
 
 The remaining examples use `python` for readability. Either activate the
 environment with `.\.venv\Scripts\Activate.ps1` first or replace `python` with

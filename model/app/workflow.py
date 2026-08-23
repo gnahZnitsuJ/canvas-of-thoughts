@@ -3,6 +3,7 @@
 import cProfile
 import hashlib
 import os
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -196,12 +197,18 @@ def build_train_test(
             else tokenizer_max_subword_length
         ),
     )
-    train_test = multiple_data_partition(
-        DATASETS,
-        training_restriction=data_defaults.TRAINING_DOCUMENT_LIMIT,
-        testing_restriction=data_defaults.TESTING_DOCUMENT_LIMIT,
-        tokenizer=tokenizer,
-    )
+    try:
+        train_test = multiple_data_partition(
+            DATASETS,
+            training_restriction=data_defaults.TRAINING_DOCUMENT_LIMIT,
+            testing_restriction=data_defaults.TESTING_DOCUMENT_LIMIT,
+            tokenizer=tokenizer,
+        )
+    except LookupError as exc:
+        raise RuntimeError(
+            "The configured NLTK Reuters corpus is unavailable. Install it with "
+            f"'{sys.executable} -m nltk.downloader reuters', then retry."
+        ) from exc
     timings["Data partition"] = perf_counter() - start
     return train_test
 

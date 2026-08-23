@@ -47,10 +47,15 @@ def _parse_int_list(value):
     return parsed
 
 
-def parse_args():
+def parse_args(argv=None):
     """Build and parse the top-level CLI for normal runs and benchmarks."""
     parser = argparse.ArgumentParser(
         description="Run the Nengo language-model workflow."
+    )
+    parser.add_argument(
+        "--check-environment",
+        action="store_true",
+        help="Check packages, Reuters corpus data, and OpenCL discovery, then exit.",
     )
     parser.add_argument(
         "--benchmark",
@@ -320,7 +325,7 @@ def parse_args():
         action="store_true",
         help="For compile-repeat-current, run one post-compile warmup step per repeat and record it.",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.shell and args.interactive:
         parser.error("--shell cannot be combined with --interactive.")

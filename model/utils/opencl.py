@@ -36,7 +36,19 @@ def _resolve_index(cli_value, env_name, default):
 
 def select_opencl_device(platform_index=None, device_index=None):
     """Pick one OpenCL platform/device pair and build a context for it."""
-    platforms = cl.get_platforms()
+    try:
+        platforms = cl.get_platforms()
+    except Exception as exc:
+        raise RuntimeError(
+            "OpenCL discovery failed. Run 'python model/main.py "
+            "--check-environment' for a complete diagnostic."
+        ) from exc
+
+    if not platforms:
+        raise RuntimeError(
+            "No OpenCL platforms were discovered. Run 'python model/main.py "
+            "--check-environment' for a complete diagnostic."
+        )
     selected_platform_index = _resolve_index(
         platform_index,
         OPENCL_PLATFORM_ENV,

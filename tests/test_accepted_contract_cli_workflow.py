@@ -38,6 +38,9 @@ class CliWorkflowContractTests(unittest.TestCase):
             },
         )
 
+    def test_environment_check_option_is_exposed_by_full_parser(self):
+        self.assertTrue(self.parse("--check-environment").check_environment)
+
     def test_full_selects_four_stages(self):
         self.assertEqual(
             resolve_workflow(self.parse("--full")),
