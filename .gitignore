@@ -1,5 +1,6 @@
 __pycache__/
 *.py[cod]
+.venv/
 .agents/
 .vscode/
 model/utils/seed_vocab*.model

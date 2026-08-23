@@ -2,9 +2,38 @@ This project is an attempt to create a NLP model using Nengo, specifically Nengo
 
 Originally, it started as my final project for AMATH 445 (Scientific Machine Learning) at the University of Waterloo. See https://github.com/gnahZnitsuJ/F24-AMATH-445.
 
-The tokenizer layer uses the third-party `regex` package for Unicode properties
-and extended grapheme clusters. Install it alongside the existing Nengo/NengoSPA
-runtime dependencies before running the model or tokenizer comparison script.
+## Requirements
+
+The recorded working environment uses Python 3.10.11 on Windows. Python package
+versions are pinned in `requirements.txt` because the Nengo, NumPy, and SciPy
+versions participate in decoder-cache and checkpoint compatibility.
+
+The full runtime also requires:
+
+- a working OpenCL implementation supplied by your GPU or CPU driver
+- the NLTK Reuters corpus, which is data and is therefore not installed by pip
+
+From PowerShell, create an isolated environment and install everything with:
+
+```powershell
+py -3.10 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m nltk.downloader reuters
+```
+
+Verify the package installation and OpenCL discovery before starting an
+expensive build:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip check
+.\.venv\Scripts\python.exe -c "import pyopencl as cl; print([p.name for p in cl.get_platforms()])"
+.\.venv\Scripts\python.exe model/main.py --dry-run
+```
+
+The remaining examples use `python` for readability. Either activate the
+environment with `.\.venv\Scripts\Activate.ps1` first or replace `python` with
+`.\.venv\Scripts\python.exe`.
 
 ## Running
 

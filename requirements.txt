@@ -1,0 +1,15 @@
+# Direct dependency set for Python 3.10 on Windows. The scientific/Nengo pins
+# match the latest recorded successful run. Keep them pinned: they participate
+# in decoder-cache and checkpoint compatibility, and newer NumPy releases are
+# not assumed safe.
+
+gensim==4.4.0
+nengo==3.2.0
+nengo-ocl==3.0.0
+nengo-spa==2.0.0
+nltk==3.9.4
+numpy==1.26.4
+pyopencl==2026.1.2
+regex==2026.4.4
+scipy==1.13.1
+tqdm==4.67.3
