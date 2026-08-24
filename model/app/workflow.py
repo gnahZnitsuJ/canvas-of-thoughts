@@ -3,6 +3,7 @@
 import cProfile
 import hashlib
 import os
+import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import datetime
@@ -205,9 +206,12 @@ def build_train_test(
             tokenizer=tokenizer,
         )
     except LookupError as exc:
+        install_command = subprocess.list2cmdline(
+            [sys.executable, "-m", "nltk.downloader", "reuters"]
+        )
         raise RuntimeError(
             "The configured NLTK Reuters corpus is unavailable. Install it with "
-            f"'{sys.executable} -m nltk.downloader reuters', then retry."
+            f"'{install_command}', then retry."
         ) from exc
     timings["Data partition"] = perf_counter() - start
     return train_test

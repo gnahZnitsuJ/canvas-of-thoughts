@@ -27,26 +27,31 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 
 if (-not $PythonPath) {
-    $venvPython = Join-Path $repoRoot "..\.venv\Scripts\python.exe"
+    $venvPython = Join-Path $repoRoot ".venv\Scripts\python.exe"
     $PythonPath = if (Test-Path -LiteralPath $venvPython) { $venvPython } else { "python" }
 }
 
-$modelMain = Join-Path $repoRoot "model\main.py"
 $baseline = @("--probe-mode", "debug", "--compile-profile", "full", "--learned-init-mode", "random-function")
 $development = @("--probe-mode", "minimal", "--compile-profile", "fast-solver", "--learned-init-mode", "zero-nosolver")
 
 function Invoke-ModelCommand {
     param([string[]]$Arguments)
 
-    $resolved = @($modelMain) + $Arguments + $ExtraArgs
+    $resolved = @("-m", "launcher", "run") + $Arguments + $ExtraArgs
     $display = @($PythonPath) + $resolved | ForEach-Object {
         if ($_ -match '\s') { '"{0}"' -f $_ } else { $_ }
     }
     Write-Host ("Resolved command: " + ($display -join " "))
     if (-not $ShowOnly) {
-        & $PythonPath @resolved
-        if ($LASTEXITCODE -ne 0) {
-            throw "Model command failed with exit code $LASTEXITCODE."
+        Push-Location $repoRoot
+        try {
+            & $PythonPath @resolved
+            if ($LASTEXITCODE -ne 0) {
+                throw "Model command failed with exit code $LASTEXITCODE."
+            }
+        }
+        finally {
+            Pop-Location
         }
     }
 }

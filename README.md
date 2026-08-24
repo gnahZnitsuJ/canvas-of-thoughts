@@ -27,15 +27,15 @@ expensive build:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip check
-.\.venv\Scripts\python.exe model/main.py --check-environment
-.\.venv\Scripts\python.exe model/main.py --dry-run
+.\.venv\Scripts\python.exe -m launcher doctor
+.\.venv\Scripts\python.exe -m launcher run --dry-run
 ```
 
-`--check-environment` verifies every direct package and pinned version, imports
-the installed modules, runs `pip check`, loads the Reuters corpus, and enumerates
-OpenCL devices.
-Normal model runs perform only a lightweight missing-package bootstrap check;
-corpus and OpenCL failures are checked when those resources are first used.
+The top-level `doctor` command verifies every direct package and pinned version,
+imports the installed modules, runs `pip check`, loads the Reuters corpus, and
+enumerates OpenCL devices. Normal `run` commands perform only a lightweight
+missing-package bootstrap check; corpus and OpenCL failures are checked when
+those resources are first used.
 
 The remaining examples use `python` for readability. Either activate the
 environment with `.\.venv\Scripts\Activate.ps1` first or replace `python` with
@@ -46,8 +46,12 @@ environment with `.\.venv\Scripts\Activate.ps1` first or replace `python` with
 The default behavior now uses a cheaper development loop:
 
 ```bash
-python model/main.py
+python -m launcher run
 ```
+
+`python model/main.py ...` remains supported as a compatibility entrypoint, but
+the top-level launcher is canonical because it owns application-wide startup
+and prerequisite handling outside the model import graph.
 
 That default path trains or loads the model, records telemetry, and stops before
 evaluation, demo prediction dumps, or interactive mode.
@@ -58,7 +62,7 @@ If you want the leanest normal run and do not need a results file, add
 Use `--full` when you want the original end-to-end behavior:
 
 ```bash
-python model/main.py --full
+python -m launcher run --full
 ```
 
 This runs the whole user-facing workflow in one go:
@@ -70,64 +74,64 @@ This runs the whole user-facing workflow in one go:
 You can now run individual stages during development:
 
 ```bash
-python model/main.py --train --no-eval --no-demo --no-interactive
-python model/main.py --eval --max-examples 50
-python model/main.py --demo --max-demo-examples 10 --top-k 3
-python model/main.py --interactive --generate --top-k 5 --max-tokens 15
-python model/main.py --shell --top-k 5 --max-tokens 15
-python model/main.py --train --probe-mode minimal
-python model/main.py --train --no-eval --opencl-platform-index 0 --opencl-device-index 0
-python model/main.py --dry-run --compile-profile fast-solver
-python model/main.py --build-only --probe-mode minimal --compile-profile fast-solver
-python model/main.py --inspect-checkpoint --checkpoint-path reuters_checkpoint.pkl
-python model/main.py --build-only --inspect-checkpoint --compare-current-architecture
-python model/main.py --dry-run --tokenizer bpe-v1
-python model/main.py --inspect-decoder-cache
+python -m launcher run --train --no-eval --no-demo --no-interactive
+python -m launcher run --eval --max-examples 50
+python -m launcher run --demo --max-demo-examples 10 --top-k 3
+python -m launcher run --interactive --generate --top-k 5 --max-tokens 15
+python -m launcher run --shell --top-k 5 --max-tokens 15
+python -m launcher run --train --probe-mode minimal
+python -m launcher run --train --no-eval --opencl-platform-index 0 --opencl-device-index 0
+python -m launcher run --dry-run --compile-profile fast-solver
+python -m launcher run --build-only --probe-mode minimal --compile-profile fast-solver
+python -m launcher run --inspect-checkpoint --checkpoint-path reuters_checkpoint.pkl
+python -m launcher run --build-only --inspect-checkpoint --compare-current-architecture
+python -m launcher run --dry-run --tokenizer bpe-v1
+python -m launcher run --inspect-decoder-cache
 ```
 
-- `python model/main.py --train --no-eval --no-demo --no-interactive`
+- `python -m launcher run --train --no-eval --no-demo --no-interactive`
   trains or loads the model, writes telemetry, and exits. This is the most useful
   quick smoke-test path when you want to verify that the model still builds and
   checkpoint loading still works.
-- `python model/main.py --eval --max-examples 50`
+- `python -m launcher run --eval --max-examples 50`
   loads the checkpoint, evaluates up to `50` next-token prediction examples, prints
   the evaluation result, records telemetry, and exits.
-- `python model/main.py --demo --max-demo-examples 10 --top-k 3`
+- `python -m launcher run --demo --max-demo-examples 10 --top-k 3`
   loads the checkpoint and prints up to `10` human-readable sample predictions with
   the top `3` candidates for each prefix. This is useful for a quick qualitative
   check of model behavior.
-- `python model/main.py --interactive --generate --top-k 5 --max-tokens 15`
+- `python -m launcher run --interactive --generate --top-k 5 --max-tokens 15`
   loads the checkpoint and opens the realtime prompt. With `--generate`, the model
   continues autoregressively after your prompt, showing up to `5` candidates per
   step and stopping after `15` generated tokens unless you end earlier.
-- `python model/main.py --shell --top-k 5 --max-tokens 15`
+- `python -m launcher run --shell --top-k 5 --max-tokens 15`
   loads the checkpoint and opens a persistent developer shell on top of the
   already-compiled runtime. That shell can run status, reset, predict, generate,
   eval, demo, and checkpoint reload commands without paying compile cost again.
-- `python model/main.py --train --probe-mode minimal`
+- `python -m launcher run --train --probe-mode minimal`
   builds the normal workflow with only the required prediction probe. This is
   the lighter instrumentation mode for compile-sensitive development runs.
-- `python model/main.py --train --no-eval --opencl-platform-index 0 --opencl-device-index 0`
+- `python -m launcher run --train --no-eval --opencl-platform-index 0 --opencl-device-index 0`
   runs the normal workflow but pins execution to a specific OpenCL platform and
   device index, which is useful on machines with multiple OpenCL providers.
-- `python model/main.py --dry-run --compile-profile fast-solver`
+- `python -m launcher run --dry-run --compile-profile fast-solver`
   resolves the workflow, runtime settings, checkpoint target, and compile knobs
   without loading data or building the Nengo model.
-- `python model/main.py --build-only --probe-mode minimal --compile-profile fast-solver`
+- `python -m launcher run --build-only --probe-mode minimal --compile-profile fast-solver`
   loads data, builds the Python Nengo model, reports build timing and network
   complexity, and stops before simulator compilation.
-- `python model/main.py --inspect-checkpoint --checkpoint-path reuters_checkpoint.pkl`
+- `python -m launcher run --inspect-checkpoint --checkpoint-path reuters_checkpoint.pkl`
   prints saved checkpoint metadata, including compile-profile and learned-init
   information, without building or compiling the model.
-- `python model/main.py --build-only --inspect-checkpoint --compare-current-architecture`
+- `python -m launcher run --build-only --inspect-checkpoint --compare-current-architecture`
   combines checkpoint inspection with a current build-only pass so you can
   compare the saved architecture signature against the present build before
   paying OpenCL compile cost.
-- `python model/main.py --dry-run --tokenizer bpe-v1`
+- `python -m launcher run --dry-run --tokenizer bpe-v1`
   selects a versioned tokenizer profile. Available profiles are `word-v1`,
   `bpe-v1`, `unigram-v1`, `character-v1`, and `byte-v1`. Tokenizer changes use
   independent seed-vector caches and are checkpoint-incompatible by design.
-- `python model/main.py --inspect-decoder-cache`
+- `python -m launcher run --inspect-decoder-cache`
   reports the persistent Nengo decoder-cache path, dependency namespace, size,
   and file count without loading data or constructing a simulator.
 
@@ -166,13 +170,13 @@ The comparison reports token counts, unique-token counts, normalized round-trip
 behavior, fingerprints, and a token preview. Repeat `--tokenizer PROFILE` to
 limit the comparison or add `--json` for machine-readable output.
 
-Compile benchmark modes are available directly from `main.py`:
+Compile benchmark modes are available through the application launcher:
 
 ```bash
-python model/main.py --benchmark compile-current
-python model/main.py --benchmark compile-components
-python model/main.py --benchmark compile-full
-python model/main.py --benchmark compile-repeat-current --benchmark-repeats 2
+python -m launcher run --benchmark compile-current
+python -m launcher run --benchmark compile-components
+python -m launcher run --benchmark compile-full
+python -m launcher run --benchmark compile-repeat-current --benchmark-repeats 2
 ```
 
 - `compile-current`

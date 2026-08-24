@@ -40,14 +40,14 @@ def select_opencl_device(platform_index=None, device_index=None):
         platforms = cl.get_platforms()
     except Exception as exc:
         raise RuntimeError(
-            "OpenCL discovery failed. Run 'python model/main.py "
-            "--check-environment' for a complete diagnostic."
+            "OpenCL discovery failed. Run 'python -m launcher "
+            "doctor' for a complete diagnostic."
         ) from exc
 
     if not platforms:
         raise RuntimeError(
-            "No OpenCL platforms were discovered. Run 'python model/main.py "
-            "--check-environment' for a complete diagnostic."
+            "No OpenCL platforms were discovered. Run 'python -m "
+            "launcher doctor' for a complete diagnostic."
         )
     selected_platform_index = _resolve_index(
         platform_index,

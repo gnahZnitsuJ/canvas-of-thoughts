@@ -2,7 +2,6 @@
 
 import ast
 import contextlib
-import importlib.util
 import io
 import sys
 import tempfile
@@ -14,25 +13,44 @@ from unittest.mock import Mock, patch
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 MODEL_DIR = ROOT_DIR / "model"
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 if str(MODEL_DIR) not in sys.path:
     sys.path.insert(0, str(MODEL_DIR))
 
 from app import workflow  # noqa: E402
-from utils import environment_check  # noqa: E402
+from launcher import cli  # noqa: E402
+from launcher.bootstrap import checks  # noqa: E402
 from utils import opencl  # noqa: E402
 
 
-def _load_main_module():
-    spec = importlib.util.spec_from_file_location("canvas_model_main", MODEL_DIR / "main.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 class RequirementManifestTests(unittest.TestCase):
+    def test_launcher_package_has_only_stdlib_and_internal_imports(self):
+        imported_modules = set()
+        launcher_root = ROOT_DIR / "launcher"
+        for source_path in launcher_root.rglob("*.py"):
+            tree = ast.parse(
+                source_path.read_text(encoding="utf-8-sig"),
+                filename=str(source_path),
+            )
+            for node in tree.body:
+                if isinstance(node, ast.Import):
+                    imported_modules.update(
+                        alias.name.split(".", 1)[0] for alias in node.names
+                    )
+                elif isinstance(node, ast.ImportFrom) and node.level == 0:
+                    imported_modules.add(node.module.split(".", 1)[0])
+
+        external_imports = imported_modules - sys.stdlib_module_names - {
+            "__future__",
+            "launcher",
+        }
+        self.assertEqual(external_imports, set())
+
     def test_project_manifest_covers_all_direct_imports(self):
-        requirements = environment_check.load_requirements()
+        requirements = checks.load_requirements()
         source_roots = (
+            ROOT_DIR / "launcher",
             ROOT_DIR / "model",
             ROOT_DIR / "scripts",
             ROOT_DIR / "tests",
@@ -54,6 +72,7 @@ class RequirementManifestTests(unittest.TestCase):
 
         local_modules = {"__future__"}
         for source_root in source_roots:
+            local_modules.add(source_root.name)
             local_modules.update(path.stem for path in source_root.glob("*.py"))
             local_modules.update(path.name for path in source_root.iterdir() if path.is_dir())
         direct_imports = imported_modules - sys.stdlib_module_names - local_modules
@@ -84,28 +103,28 @@ class RequirementManifestTests(unittest.TestCase):
             requirements_path.write_text("nengo>=3\n", encoding="utf-8")
 
             with self.assertRaisesRegex(ValueError, "exact NAME==VERSION pins"):
-                environment_check.load_requirements(requirements_path)
+                checks.load_requirements(requirements_path)
 
     def test_package_check_reports_import_and_version_failures(self):
         requirements = (
-            environment_check.RequirementSpec("first", "1.0", "first"),
-            environment_check.RequirementSpec("second", "2.0", "second"),
-            environment_check.RequirementSpec("third", "3.0", "third"),
+            checks.RequirementSpec("first", "1.0", "first"),
+            checks.RequirementSpec("second", "2.0", "second"),
+            checks.RequirementSpec("third", "3.0", "third"),
         )
         with (
-            patch.object(environment_check, "load_requirements", return_value=requirements),
+            patch.object(checks, "load_requirements", return_value=requirements),
             patch.object(
-                environment_check.metadata,
+                checks.metadata,
                 "version",
                 side_effect=("1.0", "1.5", "3.0"),
             ),
             patch.object(
-                environment_check.importlib,
+                checks.importlib,
                 "import_module",
                 side_effect=(None, None, ImportError("broken binary")),
             ),
         ):
-            results = environment_check.check_python_packages()
+            results = checks.check_python_packages()
 
         self.assertEqual(results[0].status, "OK")
         self.assertEqual(results[1].status, "FAIL")
@@ -120,11 +139,11 @@ class RequirementManifestTests(unittest.TestCase):
             stderr="",
         )
         with patch.object(
-            environment_check.subprocess,
+            checks.subprocess,
             "run",
             return_value=completed,
         ):
-            result = environment_check.check_dependency_graph()
+            result = checks.check_dependency_graph()
 
         self.assertEqual(result.status, "FAIL")
         self.assertIn("requires missing-package", result.detail)
@@ -136,11 +155,11 @@ class ExternalResourceCheckTests(unittest.TestCase):
         corpus = SimpleNamespace(fileids=Mock(return_value=["one", "two"]))
         nltk_corpus = SimpleNamespace(reuters=corpus)
         with patch.object(
-            environment_check.importlib,
+            checks.importlib,
             "import_module",
             return_value=nltk_corpus,
         ):
-            result = environment_check.check_reuters_corpus()
+            result = checks.check_reuters_corpus()
 
         self.assertEqual(result.status, "OK")
         self.assertIn("2 documents", result.detail)
@@ -153,18 +172,18 @@ class ExternalResourceCheckTests(unittest.TestCase):
         )
         cl = SimpleNamespace(get_platforms=Mock(return_value=[platform]))
         with patch.object(
-            environment_check.importlib,
+            checks.importlib,
             "import_module",
             return_value=cl,
         ):
-            result = environment_check.check_opencl()
+            result = checks.check_opencl()
 
         self.assertEqual(result.status, "OK")
         self.assertIn("Test Platform / Test GPU", result.detail)
 
-    def test_runtime_opencl_failure_points_to_environment_check(self):
+    def test_runtime_opencl_failure_points_to_doctor(self):
         with patch.object(opencl.cl, "get_platforms", return_value=[]):
-            with self.assertRaisesRegex(RuntimeError, "--check-environment"):
+            with self.assertRaisesRegex(RuntimeError, "launcher doctor"):
                 opencl.select_opencl_device()
 
     def test_runtime_reuters_failure_provides_downloader_command(self):
@@ -179,39 +198,53 @@ class ExternalResourceCheckTests(unittest.TestCase):
 
 class BootstrapTests(unittest.TestCase):
     def test_missing_packages_stop_before_model_imports(self):
-        main = _load_main_module()
         missing = (
-            environment_check.RequirementSpec("nengo", "3.2.0", "nengo"),
+            checks.RequirementSpec("nengo", "3.2.0", "nengo"),
         )
         stderr = io.StringIO()
         with (
-            patch.object(main, "missing_required_packages", return_value=missing),
-            patch.object(main, "run_model_cli") as run_model_cli,
+            patch.object(cli, "missing_required_packages", return_value=missing),
+            patch.object(cli, "run_model_cli") as run_model_cli,
             contextlib.redirect_stderr(stderr),
         ):
-            status = main.main([])
+            status = cli.run_command([])
 
         self.assertEqual(status, 1)
         run_model_cli.assert_not_called()
         self.assertIn("Missing required Python package(s): nengo", stderr.getvalue())
         self.assertIn("pip install -r", stderr.getvalue())
 
-    def test_environment_check_is_standalone_bootstrap_mode(self):
-        main = _load_main_module()
+    def test_doctor_is_standalone_bootstrap_mode(self):
         with (
-            patch.object(main, "run_environment_check", return_value=0) as check,
-            patch.object(main, "missing_required_packages") as missing,
+            patch.object(cli, "run_doctor", return_value=0) as doctor,
+            patch.object(cli, "missing_required_packages") as missing,
         ):
-            status = main.main(["--check-environment"])
+            status = cli.main(["doctor"])
 
         self.assertEqual(status, 0)
-        check.assert_called_once_with()
+        doctor.assert_called_once_with()
         missing.assert_not_called()
 
-    def test_environment_check_rejects_other_arguments(self):
-        main = _load_main_module()
+    def test_run_forwards_all_model_arguments(self):
+        with patch.object(cli, "run_command", return_value=0) as run:
+            status = cli.main(["run", "--dry-run", "--tokenizer", "bpe-v1"])
+
+        self.assertEqual(status, 0)
+        run.assert_called_once_with(
+            ["--dry-run", "--tokenizer", "bpe-v1"],
+            prog="python -m launcher run",
+        )
+
+    def test_legacy_environment_flag_delegates_to_doctor(self):
+        with patch.object(cli, "run_doctor", return_value=0) as doctor:
+            status = cli.legacy_main(["--check-environment"])
+
+        self.assertEqual(status, 0)
+        doctor.assert_called_once_with()
+
+    def test_legacy_environment_flag_rejects_other_arguments(self):
         with contextlib.redirect_stderr(io.StringIO()):
-            status = main.main(["--check-environment", "--dry-run"])
+            status = cli.legacy_main(["--check-environment", "--dry-run"])
         self.assertEqual(status, 2)
 
 

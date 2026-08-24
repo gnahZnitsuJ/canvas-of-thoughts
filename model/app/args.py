@@ -47,15 +47,11 @@ def _parse_int_list(value):
     return parsed
 
 
-def parse_args(argv=None):
-    """Build and parse the top-level CLI for normal runs and benchmarks."""
+def parse_args(argv=None, prog=None):
+    """Build and parse model workflow options after application bootstrap."""
     parser = argparse.ArgumentParser(
+        prog=prog,
         description="Run the Nengo language-model workflow."
-    )
-    parser.add_argument(
-        "--check-environment",
-        action="store_true",
-        help="Check packages, Reuters corpus data, and OpenCL discovery, then exit.",
     )
     parser.add_argument(
         "--benchmark",

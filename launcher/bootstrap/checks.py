@@ -1,4 +1,4 @@
-"""Lightweight dependency, corpus, and OpenCL environment diagnostics."""
+"""Application prerequisite diagnostics with no third-party imports at startup."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_REQUIREMENTS_PATH = PROJECT_ROOT / "requirements.txt"
+RECOMMENDED_PYTHON = (3, 10)
 _PIN_PATTERN = re.compile(r"^([A-Za-z0-9_.-]+)==([^\s;]+)$")
 
 
@@ -27,7 +28,7 @@ class RequirementSpec:
 
 @dataclass(frozen=True)
 class CheckResult:
-    """One human-readable environment-check outcome."""
+    """One human-readable prerequisite-check outcome."""
 
     label: str
     status: str
@@ -47,7 +48,8 @@ def load_requirements(path=DEFAULT_REQUIREMENTS_PATH):
     """Read the project's exact direct pins without importing third parties."""
     path = Path(path)
     requirements = []
-    for line_number, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+    lines = path.read_text(encoding="utf-8").splitlines()
+    for line_number, raw_line in enumerate(lines, 1):
         line = raw_line.split("#", 1)[0].strip()
         if not line:
             continue
@@ -55,7 +57,7 @@ def load_requirements(path=DEFAULT_REQUIREMENTS_PATH):
         if match is None:
             raise ValueError(
                 f"Unsupported requirement at {path}:{line_number}: {raw_line!r}. "
-                "Environment checks require exact NAME==VERSION pins."
+                "Prerequisite checks require exact NAME==VERSION pins."
             )
         distribution, version = match.groups()
         requirements.append(
@@ -65,6 +67,9 @@ def load_requirements(path=DEFAULT_REQUIREMENTS_PATH):
                 import_name=_import_name(distribution),
             )
         )
+
+    if not requirements:
+        raise ValueError(f"No dependency pins found in {path}.")
     return tuple(requirements)
 
 
@@ -79,6 +84,13 @@ def pip_install_command(requirements_path=DEFAULT_REQUIREMENTS_PATH):
             "-r",
             str(Path(requirements_path)),
         ]
+    )
+
+
+def doctor_command():
+    """Return the canonical comprehensive diagnostic command."""
+    return subprocess.list2cmdline(
+        [sys.executable, "-m", "launcher", "doctor"]
     )
 
 
@@ -106,18 +118,29 @@ def format_missing_package_message(
 ):
     """Explain a missing-package startup failure without a Python traceback."""
     names = ", ".join(requirement.distribution for requirement in missing)
-    check_command = subprocess.list2cmdline(
-        [sys.executable, str(PROJECT_ROOT / "model" / "main.py"), "--check-environment"]
-    )
     return "\n".join(
         [
             f"Missing required Python package(s): {names}",
             f"Interpreter: {sys.executable}",
             "Install this project's dependencies with:",
             f"  {pip_install_command(requirements_path)}",
-            "Then verify the environment with:",
-            f"  {check_command}",
+            "Then run the complete prerequisite diagnostic:",
+            f"  {doctor_command()}",
         ]
+    )
+
+
+def check_python_runtime():
+    """Report whether the interpreter matches the recorded runtime line."""
+    running = sys.version_info[:2]
+    version = sys.version.split()[0]
+    if running == RECOMMENDED_PYTHON:
+        return CheckResult("Python runtime", "OK", version)
+    expected = ".".join(str(value) for value in RECOMMENDED_PYTHON)
+    return CheckResult(
+        "Python runtime",
+        "WARN",
+        f"running {version}; the recorded environment uses Python {expected}.x",
     )
 
 
@@ -236,9 +259,10 @@ def check_opencl():
     return CheckResult("OpenCL", "OK", summary)
 
 
-def collect_environment_checks(requirements_path=DEFAULT_REQUIREMENTS_PATH):
+def collect_doctor_checks(requirements_path=DEFAULT_REQUIREMENTS_PATH):
     """Collect comprehensive checks without coupling them to the model runtime."""
     return (
+        check_python_runtime(),
         *check_python_packages(requirements_path),
         check_dependency_graph(requirements_path),
         check_reuters_corpus(),
@@ -246,18 +270,17 @@ def collect_environment_checks(requirements_path=DEFAULT_REQUIREMENTS_PATH):
     )
 
 
-def run_environment_check(requirements_path=DEFAULT_REQUIREMENTS_PATH, stream=None):
-    """Print the environment report and return a process-style status code."""
+def run_doctor(requirements_path=DEFAULT_REQUIREMENTS_PATH, stream=None):
+    """Print the prerequisite report and return a process-style status code."""
     if stream is None:
         stream = sys.stdout
 
-    print("Canvas environment check", file=stream)
+    print("Canvas of Thoughts prerequisite diagnostic", file=stream)
     print(f"Interpreter: {sys.executable}", file=stream)
-    print(f"Python: {sys.version.split()[0]}", file=stream)
     print(f"Requirements: {Path(requirements_path)}", file=stream)
 
     try:
-        results = collect_environment_checks(requirements_path)
+        results = collect_doctor_checks(requirements_path)
     except (OSError, ValueError) as exc:
         print(f"[FAIL] requirements: {exc}", file=stream)
         return 1
@@ -269,8 +292,8 @@ def run_environment_check(requirements_path=DEFAULT_REQUIREMENTS_PATH, stream=No
 
     failed = sum(result.failed for result in results)
     if failed:
-        print(f"Environment check failed: {failed} problem(s).", file=stream)
+        print(f"Prerequisite diagnostic failed: {failed} problem(s).", file=stream)
         return 1
 
-    print("Environment check passed.", file=stream)
+    print("Prerequisite diagnostic passed.", file=stream)
     return 0
