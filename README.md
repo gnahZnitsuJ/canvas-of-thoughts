@@ -22,20 +22,31 @@ py -3.10 -m venv .venv
 .\.venv\Scripts\python.exe -m nltk.downloader reuters
 ```
 
-Verify the package installation and OpenCL discovery before starting an
-expensive build:
+Verify the complete environment before starting an expensive build:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip check
 .\.venv\Scripts\python.exe -m launcher doctor
 .\.venv\Scripts\python.exe -m launcher run --dry-run
 ```
 
-The top-level `doctor` command verifies every direct package and pinned version,
-imports the installed modules, runs `pip check`, loads the Reuters corpus, and
-enumerates OpenCL devices. Normal `run` commands perform only a lightweight
-missing-package bootstrap check; corpus and OpenCL failures are checked when
-those resources are first used.
+### Startup and prerequisite checks
+
+`launcher` is the repository-level application entry point. It uses only the
+Python standard library until prerequisites have been checked, so `doctor` can
+still start and give repair instructions when packages such as Nengo are
+missing.
+
+| Command | Purpose |
+| --- | --- |
+| `python -m launcher doctor` | Run the comprehensive diagnostic: exact direct-package versions and imports, `pip check`, Reuters availability, and OpenCL discovery. |
+| `python -m launcher run ...` | Perform a fast missing-package gate, then lazily import and run the model. Corpus and OpenCL errors are reported when those resources are used. |
+| `python model/main.py ...` | Preserve the historical command surface while delegating startup to `launcher`. |
+| `python model/main.py --check-environment` | Legacy alias for `python -m launcher doctor`; use it by itself. |
+
+The lightweight gate intentionally runs on every model launch. The comprehensive
+diagnostic does not: run `doctor` after setup, dependency or driver changes, or
+when troubleshooting. A separate `python -m pip check` is normally redundant
+because `doctor` already includes it.
 
 The remaining examples use `python` for readability. Either activate the
 environment with `.\.venv\Scripts\Activate.ps1` first or replace `python` with
@@ -226,6 +237,18 @@ Run the hermetic automated suite from the repository root:
 ```bash
 python -m unittest discover -s tests -v
 ```
+
+For a quick regression check of only the launcher, missing-dependency messages,
+version validation, Reuters check, and OpenCL diagnostic behavior, run:
+
+```bash
+python -m unittest discover -s tests -p "test_environment_check.py" -v
+```
+
+This focused test uses mocks for external resources; it validates the checking
+workflow without requiring a GPU or downloading Reuters. Use `launcher doctor`
+to validate the active machine, and run the full suite before merging broader
+changes.
 
 The suite combines independently derived behavioral contracts with focused
 regression tests. The accepted-contract modules use hand-calculated examples,
