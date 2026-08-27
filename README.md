@@ -405,3 +405,60 @@ OpenCL selection can also be controlled through environment variables:
 - `CANVAS_DECODER_CACHE_DIR`
 
 CLI flags take precedence over those environment defaults.
+
+## Deterministic code audit
+
+The repository includes a small audit substrate for collecting static, Git,
+dependency, and optional test-coverage facts. It does not apply quality gates or
+recommend refactors: the telemetry is evidence for a later human or coding-agent
+review of the implementation, callers, tests, and architectural role.
+
+Install the audit-only tools separately so the pinned model dependency set stays
+unchanged:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-audit.txt
+```
+
+Collect the full initial snapshot, including a test run under branch coverage:
+
+```powershell
+.\.venv\Scripts\python.exe -m tools.code_audit collect --coverage
+```
+
+Omit `--coverage` for a fast static/Git snapshot. In that mode coverage is
+recorded as `not_requested`, never as zero. Collection writes the stable JSON
+schema to `.audit/snapshot.json` and a short navigational report to
+`.audit/summary.md`. Both are local generated artifacts; copy or rename a JSON
+snapshot when you want to keep a baseline.
+
+Retrieve bounded, agent-friendly JSON views without loading the full snapshot:
+
+```powershell
+.\.venv\Scripts\python.exe -m tools.code_audit query --view complexity --limit 10
+.\.venv\Scripts\python.exe -m tools.code_audit query --view complex-change --limit 10
+.\.venv\Scripts\python.exe -m tools.code_audit query --view complex-uncovered --limit 10
+.\.venv\Scripts\python.exe -m tools.code_audit query --view dependencies --path model/architecture
+.\.venv\Scripts\python.exe -m tools.code_audit query --view coupling --limit 10
+.\.venv\Scripts\python.exe -m tools.code_audit query --view complexity --symbol run_application
+```
+
+Other views are `change` and `recent`. Combined views expose their simple
+selection formula and retain every raw input; they are ordering aids, not risk
+or quality scores.
+
+For a before/after refactoring experiment, preserve the first snapshot, collect
+again after the change and tests, then compare stable file/symbol identifiers:
+
+```powershell
+Copy-Item .audit\snapshot.json .audit\before.json
+.\.venv\Scripts\python.exe -m tools.code_audit collect --coverage
+.\.venv\Scripts\python.exe -m tools.code_audit compare .audit\before.json .audit\snapshot.json
+```
+
+`tools/code_audit.json` defines source roots, exclusions, Git history bounds, coupling
+retention, and the coverage test command. The snapshot embeds this configuration,
+its hash, tool versions, Git revision and dirty state, analyzed paths, metric
+definitions, diagnostics, and explicit degraded states. Application sources and
+operational scripts are measured; tests, the audit implementation, virtual
+environment, bytecode, checkpoints, and generated result files are excluded.

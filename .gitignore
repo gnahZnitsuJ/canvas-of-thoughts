@@ -3,6 +3,8 @@ __pycache__/
 .venv/
 .agents/
 .vscode/
+.audit/
+.coverage
 model/utils/seed_vocab*.model
 model/checkpoints/
 model/results/
