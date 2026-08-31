@@ -81,6 +81,37 @@ SENTINELS = (
         "for encoded in sorted(current_connections - reference_connections):",
         "test_compare_telemetry.py",
     ),
+    Sentinel(
+        "preserve-shell-quit-alias",
+        "model/app/shell.py",
+        'if command in ("/exit", "/quit"):',
+        'if command == "/exit":',
+        "test_shell_commands.py",
+    ),
+    Sentinel(
+        "dry-run-stops-before-data-loading",
+        "model/app/workflow.py",
+        "    if args.dry_run:\n"
+        "        print_dry_run_summary(args, workflow_plan, training_config)\n"
+        "        return\n",
+        "    if args.dry_run:\n"
+        "        print_dry_run_summary(args, workflow_plan, training_config)\n",
+        "test_workflow_orchestration.py",
+    ),
+    Sentinel(
+        "render-changed-control-section",
+        "scripts/compare_telemetry.py",
+        "    if control_differences:\n",
+        "    if False and control_differences:\n",
+        "test_compare_telemetry.py",
+    ),
+    Sentinel(
+        "render-architecture-change-section",
+        "scripts/compare_telemetry.py",
+        '    if "architecture_signature" in differences:\n',
+        '    if False and "architecture_signature" in differences:\n',
+        "test_compare_telemetry.py",
+    ),
 )
 
 

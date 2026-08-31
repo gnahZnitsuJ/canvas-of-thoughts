@@ -53,6 +53,30 @@ def benchmark_document(profile, compile_seconds):
     }
 
 
+def report_record(identifier, compile_seconds, **overrides):
+    record = {
+        "id": identifier,
+        "model_build_seconds": 2.0,
+        "simulator_construct_seconds": compile_seconds,
+        "operator_count": 100,
+        "probe_count": 1,
+        "ensemble_count": 10,
+        "neuron_count": 500,
+        "compile_profile.name": "full",
+        "architecture_signature": "{}",
+        "timestamp": "2026-08-30T12:00:00Z",
+        "source.commit": "abc123",
+        "source.dirty": False,
+        "source.snapshot": "snapshot123",
+        "backend": "nengo_ocl",
+        "opencl.device": "GPU",
+        "warnings": [],
+        "cache_state": "warm",
+    }
+    record.update(overrides)
+    return record
+
+
 class TelemetryComparisonTests(unittest.TestCase):
     def test_normalizes_benchmark_and_calculates_profile_only_difference(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -184,6 +208,87 @@ class TelemetryComparisonTests(unittest.TestCase):
             "component build order changed: "
             "['predictor', 'refiner'] -> ['predictor']",
             changes,
+        )
+
+    def test_markdown_report_renders_metric_control_message_and_fingerprint_sections(self):
+        reference = report_record("reference", 10.0)
+        candidate = report_record(
+            "candidate",
+            15.0,
+            **{
+                "compile_profile.name": "fast-solver",
+                "source.commit": "def456",
+            },
+        )
+
+        report = compare_telemetry.markdown_report(
+            [reference, candidate],
+            {"simulator_construct_seconds", "compile_profile.name"},
+            ["Unexpected control differences: opencl.device"],
+        )
+
+        self.assertIn("# Telemetry Comparison", report)
+        self.assertIn("> Unexpected control differences: opencl.device", report)
+        self.assertIn("## Metric deltas", report)
+        self.assertIn(
+            "| simulator_construct_seconds | 1 | 15.000 | 5.000 | 50.0 |",
+            report,
+        )
+        self.assertIn("## Changed controls", report)
+        self.assertIn("| compile_profile.name | full | fast-solver |", report)
+        self.assertIn("## Run fingerprints", report)
+        self.assertIn("- Run 1: `candidate`", report)
+        self.assertIn("source commit: `def456`", report)
+
+    def test_markdown_report_describes_semantic_architecture_changes(self):
+        baseline = {
+            "architecture_name": "root-context-v1",
+            "component_build_order": ["predictor", "refiner"],
+            "components": [
+                {"name": "predictor", "type": "context_predictor"},
+                {"name": "refiner", "type": "prediction_refiner"},
+            ],
+            "connections": [
+                {"source": "predictor.prediction", "target": "refiner.input"}
+            ],
+            "roles": {"prediction": "refiner.prediction"},
+        }
+        variant = {
+            "architecture_name": "no-refiner-v1",
+            "component_build_order": ["predictor"],
+            "components": [
+                {"name": "predictor", "type": "context_predictor"}
+            ],
+            "connections": [],
+            "roles": {"prediction": "predictor.prediction"},
+        }
+        reference = report_record(
+            "reference",
+            10.0,
+            architecture_signature=json.dumps(baseline, sort_keys=True),
+        )
+        candidate = report_record(
+            "candidate",
+            10.0,
+            architecture_signature=json.dumps(variant, sort_keys=True),
+        )
+
+        report = compare_telemetry.markdown_report(
+            [reference, candidate],
+            {"architecture_signature"},
+            [],
+        )
+
+        self.assertIn("## Architecture signature changes", report)
+        self.assertIn("## Semantic topology changes", report)
+        self.assertIn("component removed: refiner", report)
+        self.assertIn(
+            "role changed: prediction (refiner.prediction -> predictor.prediction)",
+            report,
+        )
+        self.assertIn(
+            "checkpoint compatibility impact: structural mismatch",
+            report,
         )
 
 

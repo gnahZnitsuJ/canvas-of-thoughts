@@ -38,6 +38,7 @@ def workflow_args(**overrides):
         "calibrate_token_duration": False,
         "force_retrain": False,
         "dry_run": False,
+        "inspect_decoder_cache": False,
         "inspect_checkpoint": False,
         "build_only": False,
         "checkpoint_path": "test.pkl",
@@ -47,6 +48,7 @@ def workflow_args(**overrides):
         "compile_profile": "fast-solver",
         "learned_init_mode": "zero-nosolver",
         "learned_init_seed": None,
+        "decoder_cache_mode": "auto",
         "architecture": "root-context-v1",
         "tokenizer": "word-v1",
         "tokenizer_normalization": "NFC",
@@ -167,6 +169,183 @@ class WorkflowOrchestrationTests(unittest.TestCase):
         )
         self.assertEqual(payload["evaluation"], {"accuracy": 0.5})
         self.assertEqual(payload["calibration"], {"selected_k": 1})
+
+    def test_decoder_cache_inspection_exits_before_runtime_planning(self):
+        args = workflow_args(inspect_decoder_cache=True)
+
+        with (
+            patch.object(
+                workflow,
+                "inspect_decoder_cache",
+                return_value={"path": "cache"},
+            ) as inspect,
+            patch.object(
+                workflow,
+                "format_decoder_cache_summary",
+                return_value="decoder cache summary",
+            ) as format_summary,
+            patch.object(workflow, "load_requested_runtime_profile") as load_profile,
+            redirect_stdout(io.StringIO()) as stdout,
+        ):
+            workflow.run_application(args)
+
+        self.assertIn("decoder cache summary", stdout.getvalue())
+        inspect.assert_called_once_with()
+        format_summary.assert_called_once_with({"path": "cache"})
+        load_profile.assert_not_called()
+
+    def test_dry_run_reports_resolved_plan_without_loading_data(self):
+        args = workflow_args(dry_run=True)
+        training_config = {
+            "training_mode": "single_pass",
+            "token_duration": 0.02,
+            "token_duration_source": "default",
+            "step_time": 0.02,
+        }
+
+        with (
+            patch.object(workflow, "load_requested_runtime_profile", return_value=None),
+            patch.object(
+                workflow,
+                "resolve_training_configuration",
+                return_value=training_config,
+            ),
+            patch.object(workflow, "build_train_test") as build_data,
+            redirect_stdout(io.StringIO()) as stdout,
+        ):
+            workflow.run_application(args)
+
+        output = stdout.getvalue()
+        self.assertIn("Dry run summary", output)
+        self.assertIn("'train': True", output)
+        self.assertIn("training mode:           single_pass", output)
+        self.assertIn("decoder cache mode:      auto", output)
+        build_data.assert_not_called()
+
+    def test_calibration_preconditions_fail_before_loading_data(self):
+        cases = (
+            (
+                workflow_args(
+                    train=True,
+                    calibrate_token_duration=True,
+                    force_retrain=True,
+                ),
+                {
+                    "training_mode": "single_pass",
+                    "token_duration": 0.02,
+                    "token_duration_source": "default",
+                    "step_time": 0.02,
+                },
+                "requires --train-mode scheduled",
+            ),
+            (
+                workflow_args(
+                    train=True,
+                    calibrate_token_duration=True,
+                    force_retrain=False,
+                ),
+                {
+                    "training_mode": "scheduled",
+                    "token_duration": 0.02,
+                    "token_duration_source": "explicit",
+                    "step_time": 0.001,
+                },
+                "requires an actual retraining run",
+            ),
+        )
+
+        for args, training_config, message in cases:
+            with self.subTest(message=message):
+                with (
+                    patch.object(
+                        workflow,
+                        "load_requested_runtime_profile",
+                        return_value=None,
+                    ),
+                    patch.object(
+                        workflow,
+                        "resolve_training_configuration",
+                        return_value=training_config,
+                    ),
+                    patch.object(workflow, "build_train_test") as build_data,
+                ):
+                    with self.assertRaisesRegex(ValueError, message):
+                        workflow.run_application(args)
+
+                build_data.assert_not_called()
+
+    def test_checkpoint_inspection_prints_metadata_without_loading_data(self):
+        args = workflow_args(inspect_checkpoint=True)
+        metadata = {
+            "timestamp": "2026-08-30T12:00:00Z",
+            "architecture": {"training_semantics_version": "v1"},
+            "compile_fingerprint": {},
+        }
+
+        with (
+            patch.object(workflow, "load_requested_runtime_profile", return_value=None),
+            patch.object(
+                workflow,
+                "resolve_training_configuration",
+                return_value={
+                    "training_mode": "single_pass",
+                    "token_duration": 0.02,
+                    "token_duration_source": "default",
+                    "step_time": 0.02,
+                },
+            ),
+            patch.object(
+                workflow,
+                "load_checkpoint_metadata",
+                return_value=(Path("resolved-test.pkl"), metadata),
+            ),
+            patch.object(workflow, "build_train_test") as build_data,
+            redirect_stdout(io.StringIO()) as stdout,
+        ):
+            workflow.run_application(args)
+
+        output = stdout.getvalue()
+        self.assertIn("Checkpoint inspection", output)
+        self.assertIn("resolved-test.pkl", output)
+        self.assertIn("training semantics:      v1", output)
+        build_data.assert_not_called()
+
+    def test_missing_inspection_checkpoint_is_not_hidden_without_build_only(self):
+        args = workflow_args(inspect_checkpoint=True)
+
+        with (
+            patch.object(workflow, "load_requested_runtime_profile", return_value=None),
+            patch.object(
+                workflow,
+                "resolve_training_configuration",
+                return_value={
+                    "training_mode": "single_pass",
+                    "token_duration": 0.02,
+                    "token_duration_source": "default",
+                    "step_time": 0.02,
+                },
+            ),
+            patch.object(
+                workflow,
+                "load_checkpoint_metadata",
+                side_effect=FileNotFoundError("missing checkpoint"),
+            ),
+            patch.object(workflow, "build_train_test") as build_data,
+        ):
+            with self.assertRaisesRegex(FileNotFoundError, "missing checkpoint"):
+                workflow.run_application(args)
+
+        build_data.assert_not_called()
+
+    def test_disabled_run_telemetry_does_not_persist(self):
+        with (
+            patch.object(workflow, "save_run_telemetry") as save,
+            redirect_stdout(io.StringIO()) as stdout,
+        ):
+            workflow.maybe_save_run_telemetry(False, object())
+
+        save.assert_not_called()
+        self.assertIn("Telemetry recording disabled", stdout.getvalue())
 
     def test_runtime_stages_follow_application_order_without_compile(self):
         events = []
